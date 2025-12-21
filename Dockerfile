@@ -40,5 +40,5 @@ ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
 # Expose port (if needed for health checks)
 EXPOSE 3000
 
-# Start Xvfb and the application
-CMD Xvfb :99 -screen 0 1024x768x16 & npm start
+# Start Xvfb, init database, then start application
+CMD Xvfb :99 -screen 0 1024x768x16 & npm run db:init && npm start
