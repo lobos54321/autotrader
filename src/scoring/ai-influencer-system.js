@@ -129,42 +129,64 @@ export class AIInfluencerSystem {
    */
   seedInitialKOLs() {
     const initialKOLs = [
-      // Tier 1 - Major influencers (>500k followers, massive impact)
+      // ===== Tier 1 - Major influencers (>300k followers, massive market impact) =====
       {
-        handle: 'ansaboris',
+        handle: 'blknoiz06',
         display_name: 'Ansem',
-        followers: 600000,
+        followers: 650000,
         tier: 'Tier1',
         influence_score: 9.5,
         focus_areas: ['meme', 'solana'],
         chains: ['SOL'],
         reliability_score: 7.5,
-        ai_notes: 'Top Solana meme coin caller. Massive following, moves markets. Sometimes dumps on followers.'
+        ai_notes: 'Top Solana meme coin caller. Massive following, single tweet can 10x a coin.'
       },
       {
         handle: 'MustStopMurad',
         display_name: 'Murad',
-        followers: 400000,
+        followers: 450000,
         tier: 'Tier1',
         influence_score: 9.0,
         focus_areas: ['meme', 'culture'],
         chains: ['SOL', 'ETH'],
         reliability_score: 8.0,
-        ai_notes: 'Meme coin maximalist. Strong cult following. Memecoin supercycle thesis.'
+        ai_notes: 'Meme coin maximalist. Memecoin supercycle thesis. Strong cult following.'
       },
       {
-        handle: 'blaboris',
-        display_name: 'Blknoiz06',
-        followers: 300000,
+        handle: 'AshCryptoReal',
+        display_name: 'Ash Crypto',
+        followers: 400000,
         tier: 'Tier1',
         influence_score: 8.5,
-        focus_areas: ['trading', 'meme'],
+        focus_areas: ['trading', 'meme', 'macro'],
+        chains: ['SOL', 'ETH', 'BTC'],
+        reliability_score: 7.5,
+        ai_notes: 'Veteran trader with deep market wisdom. Covers meme coins and broader market.'
+      },
+      {
+        handle: 'LarpVonTrier',
+        display_name: 'Larp Von Trier',
+        followers: 350000,
+        tier: 'Tier1',
+        influence_score: 8.5,
+        focus_areas: ['meme', 'degen'],
         chains: ['SOL'],
         reliability_score: 7.0,
-        ai_notes: 'Active trader, frequent calls. High volume but mixed results.'
+        ai_notes: 'Sharp humor with market analysis. Frequent meme coin commentary.'
       },
       
-      // Tier 2 - Significant influencers (100k-500k followers)
+      // ===== Tier 2 - Significant influencers (100k-300k followers) =====
+      {
+        handle: 'Poe_Ether',
+        display_name: 'POE',
+        followers: 280000,
+        tier: 'Tier2',
+        influence_score: 8.0,
+        focus_areas: ['meme', 'early_calls'],
+        chains: ['SOL', 'ETH'],
+        reliability_score: 7.5,
+        ai_notes: 'Bold early calls on emerging meme coins before mainstream.'
+      },
       {
         handle: 'HsakaTrades',
         display_name: 'Hsaka',
@@ -175,6 +197,28 @@ export class AIInfluencerSystem {
         chains: ['SOL', 'ETH'],
         reliability_score: 8.0,
         ai_notes: 'Technical analysis focused. More selective with calls.'
+      },
+      {
+        handle: 'artsch00lreject',
+        display_name: 'Artschool Reject',
+        followers: 220000,
+        tier: 'Tier2',
+        influence_score: 7.5,
+        focus_areas: ['meme', 'culture'],
+        chains: ['SOL'],
+        reliability_score: 7.0,
+        ai_notes: 'Blends art and market sentiment. Spots viral meme potential.'
+      },
+      {
+        handle: 'thecexoffender',
+        display_name: 'CEX Offender',
+        followers: 200000,
+        tier: 'Tier2',
+        influence_score: 7.0,
+        focus_areas: ['degen', 'meme'],
+        chains: ['SOL', 'ETH'],
+        reliability_score: 6.5,
+        ai_notes: 'Edgy humor, unfiltered commentary on degen launches.'
       },
       {
         handle: 'DegenSpartan',
@@ -209,8 +253,63 @@ export class AIInfluencerSystem {
         reliability_score: 7.0,
         ai_notes: 'Contrarian views, macro analysis.'
       },
+      {
+        handle: 'arrogantfrfr',
+        display_name: 'Modest',
+        followers: 140000,
+        tier: 'Tier2',
+        influence_score: 6.5,
+        focus_areas: ['meme', 'degen'],
+        chains: ['SOL'],
+        reliability_score: 6.5,
+        ai_notes: 'Transparent meme coin calls, strong community engagement.'
+      },
+      {
+        handle: 'iambroots',
+        display_name: 'Broots',
+        followers: 130000,
+        tier: 'Tier2',
+        influence_score: 6.5,
+        focus_areas: ['meme', 'trading'],
+        chains: ['SOL'],
+        reliability_score: 7.0,
+        ai_notes: 'Consistent meme coin analysis and community engagement.'
+      },
       
-      // Tier 3 - Notable influencers (50k-100k followers)
+      // ===== Tier 3 - Notable influencers (50k-100k followers) =====
+      {
+        handle: 'UniswapVillain',
+        display_name: 'Uniswap Villain',
+        followers: 95000,
+        tier: 'Tier3',
+        influence_score: 6.0,
+        focus_areas: ['defi', 'meme'],
+        chains: ['ETH', 'SOL'],
+        reliability_score: 6.0,
+        ai_notes: 'DeFi and meme coin plays.'
+      },
+      {
+        handle: 'CrashiusClay69',
+        display_name: 'Crash',
+        followers: 85000,
+        tier: 'Tier3',
+        influence_score: 5.5,
+        focus_areas: ['meme', 'degen'],
+        chains: ['SOL'],
+        reliability_score: 5.5,
+        ai_notes: 'High risk degen plays.'
+      },
+      {
+        handle: 'CryptoWendyO',
+        display_name: 'Wendy O',
+        followers: 80000,
+        tier: 'Tier3',
+        influence_score: 5.5,
+        focus_areas: ['trading', 'education'],
+        chains: ['SOL', 'ETH'],
+        reliability_score: 7.0,
+        ai_notes: 'Active trader, educational content on risk management.'
+      },
       {
         handle: 'gameaboris',
         display_name: 'Gameaon',
@@ -232,6 +331,17 @@ export class AIInfluencerSystem {
         chains: ['SOL', 'BSC'],
         reliability_score: 5.5,
         ai_notes: 'Frequent caller, high volume.'
+      },
+      {
+        handle: 'larpalt',
+        display_name: 'o.o',
+        followers: 65000,
+        tier: 'Tier3',
+        influence_score: 5.0,
+        focus_areas: ['meme', 'degen'],
+        chains: ['SOL'],
+        reliability_score: 5.5,
+        ai_notes: 'Community engagement focused.'
       }
     ];
 

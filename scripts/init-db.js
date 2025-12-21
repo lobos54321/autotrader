@@ -390,8 +390,10 @@ const insertTelegramChannel = db.prepare(`
   ) VALUES (?, ?, ?, ?)
 `);
 
+let channelCount = 0;
 for (const line of lines) {
-  if (!line.trim()) continue;
+  // Skip empty lines and comments
+  if (!line.trim() || line.trim().startsWith('#')) continue;
 
   const [name, link, tier, status, ev, reject] = line.split(',').map(s => s.trim());
 
@@ -418,9 +420,10 @@ for (const line of lines) {
       isActive
     );
   }
+  channelCount++;
 }
 
-console.log(`✅ Loaded ${lines.filter(l => l.trim()).length} channels`);
+console.log(`✅ Loaded ${channelCount} channels`);
 
 db.close();
 

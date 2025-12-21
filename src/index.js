@@ -32,6 +32,7 @@ import { SignalSourceOptimizer } from './scoring/signal-source-optimizer.js';
 import { ShadowPriceTracker } from './tracking/shadow-price-tracker.js';
 import { startDashboardServer } from './web/dashboard-server.js';
 import { RiskManager } from './risk/risk-manager.js';
+import { SmartMoneyTracker } from './tracking/smart-money-tracker.js';
 
 dotenv.config();
 
@@ -59,6 +60,9 @@ class SentimentArbitrageSystem {
     
     // Signal Source Optimizer - auto-optimize for higher win rate
     this.sourceOptimizer = new SignalSourceOptimizer(this.config, this.db);
+    
+    // Smart Money Tracker - 聪明钱追踪
+    this.smartMoneyTracker = new SmartMoneyTracker(this.config, this.softScorer.dynamicScoring);
     
     // Shadow Price Tracker - track prices in shadow mode for source evaluation
     this.shadowTracker = new ShadowPriceTracker(
@@ -491,6 +495,18 @@ class SentimentArbitrageSystem {
           sentiment: 'neutral',
           kol_count: 0
         };
+      }
+
+      // Collect Smart Money data
+      let smartMoneyData = null;
+      try {
+        smartMoneyData = await this.smartMoneyTracker.getSmartMoneyScore(token_ca, chain);
+        if (smartMoneyData.score !== 0) {
+          console.log(`   🐋 Smart Money: ${smartMoneyData.reasons.join(', ')}`);
+        }
+      } catch (error) {
+        console.log(`   ⚠️  Smart money check failed: ${error.message}`);
+        smartMoneyData = { score: 0, reasons: ['数据获取失败'] };
       }
 
       // Prepare data structures for soft scorer

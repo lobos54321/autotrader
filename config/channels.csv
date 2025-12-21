@@ -1,19 +1,36 @@
 channel_name,tme_link,tier,status,historical_30_120_ev,reject_ratio_24h,notes
+# ===== Tier A - Top Quality Channels =====
 CXOStrategyBot,t.me/CXOStrategyBot,A,ACTIVE,2.5,0.15,Strategy signals
 MomentumTrackerCN,t.me/MomentumTrackerCN,A,ACTIVE,2.5,0.15,Primary aggregator
 SOLSmartAlert,t.me/SOLSmartAlert,A,ACTIVE,2.3,0.18,SOL smart money alerts
 SOLCabalAlertCN,t.me/SOLCabalAlertCN,A,ACTIVE,2.2,0.18,SOL cabal alerts CN
+Xiao_Trading,t.me/Xiao_Trading,A,ACTIVE,2.0,0.20,Xiao trading signals
+阴谋集团扫货,t.me/conspiracy_sweep,A,ACTIVE,2.5,0.15,SOL conspiracy sweep
+Dogee 金狗特训班｜聪明钱信念,t.me/dogee_golddog,A,ACTIVE,2.3,0.18,Gold dog training
+DexBoost Alerts,t.me/dexboost_alerts,A,ACTIVE,2.2,0.18,DexBoost signals
+SolanaMemeCoinss,t.me/SolanaMemeCoinss,A,ACTIVE,2.4,0.16,Top SOL meme calls
+solalphacalls,t.me/solalphacalls,A,ACTIVE,2.3,0.18,SOL alpha sniper calls
+# ===== Tier B - Good Quality Channels =====
 BSCAlphaWallet,t.me/BSCAlphaWallet,B,ACTIVE,1.8,0.22,BSC alpha wallet tracking
 BSCEarly_AlertCN,t.me/BSCEarly_AlertCN,B,ACTIVE,1.8,0.22,BSC early alerts CN
 Picgemscalls,t.me/Picgemscalls,B,ACTIVE,1.6,0.25,Gem calls
 DexscreenerBoostAlerts,t.me/DexscreenerBoostAlerts,B,ACTIVE,1.7,0.23,Dexscreener boost alerts
 gem1000xpump,t.me/gem1000xpump,B,ACTIVE,1.5,0.28,1000x gem pump calls
 wedegentheyaped,t.me/wedegentheyaped,B,ACTIVE,1.6,0.25,Degen ape calls
-Xiao_Trading,t.me/Xiao_Trading,A,ACTIVE,2.0,0.20,Xiao trading signals
 nhn0x69420,t.me/nhn0x69420,B,ACTIVE,1.5,0.28,NHN signals
-阴谋集团扫货,t.me/conspiracy_sweep,A,ACTIVE,2.5,0.15,SOL conspiracy sweep
-Dogee 金狗特训班｜聪明钱信念,t.me/dogee_golddog,A,ACTIVE,2.3,0.18,Gold dog training
 狗狗的小聪明·BSC精选版,t.me/smartdog_bsc,B,ACTIVE,1.8,0.22,BSC smart dog
 Four.meme 早期提醒,t.me/fourmeme_alert,B,ACTIVE,1.7,0.23,Four.meme alerts
 社区监控,t.me/community_monitor,B,ACTIVE,1.6,0.25,Community monitor
-DexBoost Alerts,t.me/dexboost_alerts,A,ACTIVE,2.2,0.18,DexBoost signals
+MadApesCalls,t.me/MadApesCalls,B,ACTIVE,1.7,0.24,Meme coin analysis
+FullSendGems,t.me/FullSendGems,B,ACTIVE,1.6,0.26,Premium gem signals
+CryptoGemsAlpha,t.me/CryptoGemsAlpha,B,ACTIVE,1.7,0.23,Multi-chain gems
+SOLGemHunters,t.me/SOLGemHunters,B,ACTIVE,1.8,0.21,SOL gem hunters
+BSCGemAlerts,t.me/BSCGemAlerts,B,ACTIVE,1.6,0.25,BSC gem alerts
+PumpFunAlerts,t.me/PumpFunAlerts,B,ACTIVE,1.5,0.28,Pump.fun new launches
+RaydiumAlerts,t.me/RaydiumAlerts,B,ACTIVE,1.7,0.22,Raydium new pairs
+# ===== Tier C - Lower Quality / High Noise =====
+DegenPlaysCN,t.me/DegenPlaysCN,C,ACTIVE,1.2,0.35,High risk degen plays
+MemeCoinsEarly,t.me/MemeCoinsEarly,C,ACTIVE,1.3,0.32,Early meme signals
+SOLDegenAlerts,t.me/SOLDegenAlerts,C,ACTIVE,1.2,0.35,SOL degen alerts
+BSCNewTokens,t.me/BSCNewTokens,C,ACTIVE,1.1,0.38,BSC new token alerts
+CryptoWhalesIO,t.me/CryptoWhalesIO,C,ACTIVE,1.4,0.30,Whale tracking
