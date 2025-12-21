@@ -704,13 +704,61 @@ export class SolanaSnapshotService {
    * @returns {Promise<Object>} { name, symbol, description }
    */
   async getTokenMetadata(tokenCA) {
+    // 尝试多个 API 源获取 metadata
+    
+    // 1. 先尝试 DexScreener（免费且稳定）
+    try {
+      const dexResponse = await axios.get(
+        `https://api.dexscreener.com/latest/dex/tokens/${tokenCA}`,
+        { timeout: 5000 }
+      );
+      
+      const pair = dexResponse.data?.pairs?.[0];
+      if (pair?.baseToken) {
+        const metadata = {
+          name: pair.baseToken.name || null,
+          symbol: pair.baseToken.symbol || null,
+          description: null
+        };
+        if (metadata.name || metadata.symbol) {
+          console.log(`   📝 Token: ${metadata.name || 'Unknown'} (${metadata.symbol || 'Unknown'}) [DexScreener]`);
+          return metadata;
+        }
+      }
+    } catch (error) {
+      // DexScreener 失败，继续尝试其他 API
+    }
+
+    // 2. 尝试 Pump.fun API（对于 pump 结尾的地址）
+    if (tokenCA.toLowerCase().endsWith('pump')) {
+      try {
+        const pumpResponse = await axios.get(
+          `https://frontend-api.pump.fun/coins/${tokenCA}`,
+          { timeout: 5000 }
+        );
+        
+        if (pumpResponse.data) {
+          const metadata = {
+            name: pumpResponse.data.name || null,
+            symbol: pumpResponse.data.symbol || null,
+            description: pumpResponse.data.description || null
+          };
+          if (metadata.name || metadata.symbol) {
+            console.log(`   📝 Token: ${metadata.name || 'Unknown'} (${metadata.symbol || 'Unknown'}) [Pump.fun]`);
+            return metadata;
+          }
+        }
+      } catch (error) {
+        // Pump.fun 失败，继续
+      }
+    }
+
+    // 3. 最后尝试 Alchemy（可能 503）
     if (!this.alchemyApiKey) {
-      console.log('   ⚠️  Alchemy API key not configured - cannot fetch metadata');
       return { name: null, symbol: null, description: null };
     }
 
     try {
-      // ⏱️  Rate limiting: wait for token before Alchemy API call
       await this.rateLimiter.throttle();
 
       const response = await axios.post(
@@ -735,7 +783,6 @@ export class SolanaSnapshotService {
       const asset = response.data?.result;
 
       if (!asset) {
-        console.log('   ⚠️  Token metadata not found');
         return { name: null, symbol: null, description: null };
       }
 
@@ -745,7 +792,6 @@ export class SolanaSnapshotService {
         description: asset.content?.metadata?.description || null
       };
 
-      // Log the metadata
       if (metadata.name || metadata.symbol) {
         console.log(`   📝 Token: ${metadata.name || 'Unknown'} (${metadata.symbol || 'Unknown'}) [Alchemy]`);
       }
