@@ -278,7 +278,74 @@ export class SoftAlphaScorer {
     // 1. 流动性评分 (0-4 分)
     // ==========================================
     const liquidityUSD = chainData.liquidity_usd || 0;
-    
+    const isPumpfun = chainData.is_pumpfun || false;
+    const marketCap = chainData.market_cap || 0;
+    const volume24h = chainData.volume_24h || 0;
+    const txns24h = chainData.txns_24h || 0;
+    const bondingProgress = chainData.bonding_progress || 0;
+
+    // ==========================================
+    // Pump.fun 特殊评分逻辑
+    // ==========================================
+    if (isPumpfun) {
+      // Pump.fun 用 marketCap + volume + txns 评分
+      
+      // 市值评分 (0-3分)
+      if (marketCap >= 50000) {
+        score += 3;
+        reasons.push(`🚀 高市值: $${(marketCap/1000).toFixed(0)}K`);
+      } else if (marketCap >= 20000) {
+        score += 2;
+        reasons.push(`📈 中市值: $${(marketCap/1000).toFixed(0)}K`);
+      } else if (marketCap >= 5000) {
+        score += 1;
+        reasons.push(`市值: $${(marketCap/1000).toFixed(1)}K`);
+      } else {
+        reasons.push(`低市值: $${marketCap.toFixed(0)}`);
+      }
+
+      // 24h 交易量评分 (0-2分)
+      if (volume24h >= 50000) {
+        score += 2;
+        reasons.push(`🔥 高交易量: $${(volume24h/1000).toFixed(0)}K`);
+      } else if (volume24h >= 10000) {
+        score += 1;
+        reasons.push(`交易量: $${(volume24h/1000).toFixed(0)}K`);
+      }
+
+      // 24h 交易次数评分 (0-2分)
+      if (txns24h >= 500) {
+        score += 2;
+        reasons.push(`🔥 活跃交易: ${txns24h}笔`);
+      } else if (txns24h >= 100) {
+        score += 1;
+        reasons.push(`交易: ${txns24h}笔`);
+      }
+
+      // Bonding 进度 (0-2分) - 接近毕业加分
+      if (bondingProgress >= 80) {
+        score += 2;
+        reasons.push(`🎓 即将毕业: ${bondingProgress.toFixed(0)}%`);
+      } else if (bondingProgress >= 50) {
+        score += 1;
+        reasons.push(`进度: ${bondingProgress.toFixed(0)}%`);
+      }
+
+      // TG+Twitter 同步 (0-1分)
+      if (socialData.x_unique_authors_15m && socialData.x_unique_authors_15m >= 3) {
+        score += 1;
+        reasons.push('TG+Twitter 同步');
+      }
+
+      return {
+        score: Math.min(10, score),
+        reasons
+      };
+    }
+
+    // ==========================================
+    // 非 Pump.fun：正常流动性评分
+    // ==========================================
     if (liquidityUSD >= 100000) {
       score += 4;
       reasons.push(`优秀流动性: $${(liquidityUSD/1000).toFixed(0)}K`);
@@ -295,9 +362,9 @@ export class SoftAlphaScorer {
       score += 0;
       reasons.push(`⚠️ 极低流动性: $${liquidityUSD.toFixed(0)}`);
     } else {
-      // Pump.fun bonding curve 没有流动性，给默认分
+      // 无数据，给默认分
       score += 2;
-      reasons.push('Bonding Curve (无LP数据)');
+      reasons.push('流动性未知');
     }
 
     // ==========================================

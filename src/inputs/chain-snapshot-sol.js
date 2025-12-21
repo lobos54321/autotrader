@@ -105,6 +105,13 @@ export class SolanaSnapshotService {
         liquidity_unit: 'SOL',
         liquidity_usd: this.unwrap(liquidity)?.liquidity_usd || null,
 
+        // Pump.fun 特有数据
+        is_pumpfun: this.unwrap(liquidity)?.is_pumpfun || false,
+        market_cap: this.unwrap(liquidity)?.market_cap || null,
+        volume_24h: this.unwrap(liquidity)?.volume_24h || null,
+        txns_24h: this.unwrap(liquidity)?.txns_24h || null,
+        bonding_progress: this.unwrap(liquidity)?.bonding_progress || null,
+
         // Top10
         top10_percent: this.unwrap(top10Data)?.top10_percent || null,
         holder_count: this.unwrap(top10Data)?.holder_count || null,
@@ -228,22 +235,54 @@ export class SolanaSnapshotService {
         return null;
       }
 
-      const pair = response.data.pairs.reduce((max, p) =>
-        (p.liquidity?.usd || 0) > (max.liquidity?.usd || 0) ? p : max
-      );
+      // 优先找有 liquidity 的 pair（Raydium 等）
+      const pairWithLiquidity = response.data.pairs.find(p => p.liquidity?.usd > 0);
+      
+      if (pairWithLiquidity) {
+        // 正常 DEX pair（有流动性池）
+        const liquidityUSD = pairWithLiquidity.liquidity.usd;
+        const solPrice = await this.getSOLPrice();
+        const liquiditySOL = liquidityUSD / 2 / solPrice;
 
-      const liquidityUSD = pair.liquidity?.usd || 0;
+        return {
+          liquidity: liquiditySOL,
+          liquidity_usd: liquidityUSD,
+          base: pairWithLiquidity.liquidity?.base,
+          quote: pairWithLiquidity.liquidity?.quote,
+          is_pumpfun: false
+        };
+      }
 
-      // Estimate SOL liquidity (assuming ~half is SOL in SOL/Token pair)
-      // This is approximate, actual ratio may vary
-      const solPrice = await this.getSOLPrice();
-      const liquiditySOL = liquidityUSD / 2 / solPrice;
+      // Pump.fun Bonding Curve（没有 liquidity，用 marketCap 代替）
+      const pumpfunPair = response.data.pairs.find(p => p.dexId === 'pumpfun');
+      
+      if (pumpfunPair) {
+        const marketCap = pumpfunPair.marketCap || pumpfunPair.fdv || 0;
+        const volume24h = pumpfunPair.volume?.h24 || 0;
+        const txns24h = (pumpfunPair.txns?.h24?.buys || 0) + (pumpfunPair.txns?.h24?.sells || 0);
+        
+        // Pump.fun 的"流动性"用 marketCap 的一定比例估算
+        // Bonding curve 机制保证大约 20% 可以即时交易
+        const estimatedLiquidity = marketCap * 0.2;
+        
+        return {
+          liquidity: null,
+          liquidity_usd: estimatedLiquidity,
+          market_cap: marketCap,
+          volume_24h: volume24h,
+          txns_24h: txns24h,
+          is_pumpfun: true,
+          bonding_progress: marketCap / 69000 * 100  // 69K 毕业到 Raydium
+        };
+      }
 
+      // 其他情况，用第一个 pair
+      const pair = response.data.pairs[0];
       return {
-        liquidity: liquiditySOL,
-        liquidity_usd: liquidityUSD,
-        base: pair.liquidity?.base,
-        quote: pair.liquidity?.quote
+        liquidity: null,
+        liquidity_usd: pair.liquidity?.usd || 0,
+        market_cap: pair.marketCap || pair.fdv || 0,
+        is_pumpfun: false
       };
     } catch (error) {
       console.error('Error getting liquidity:', error.message);

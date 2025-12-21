@@ -604,7 +604,13 @@ class SentimentArbitrageSystem {
           liquidity_usd: snapshot.liquidity_usd || 0,
           top10_percent: snapshot.top10_percent || null,
           holder_count: snapshot.holder_count || null,
-          current_price: snapshot.current_price || 0
+          current_price: snapshot.current_price || 0,
+          // Pump.fun 特有数据
+          is_pumpfun: snapshot.is_pumpfun || false,
+          market_cap: snapshot.market_cap || 0,
+          volume_24h: snapshot.volume_24h || 0,
+          txns_24h: snapshot.txns_24h || 0,
+          bonding_progress: snapshot.bonding_progress || 0
         }
       };
 
