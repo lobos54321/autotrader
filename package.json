@@ -1,0 +1,50 @@
+{
+  "name": "sentiment-arbitrage-system",
+  "version": "2.0.0",
+  "description": "Institutional-grade on-chain sentiment arbitrage system (MVP 2.0)",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "shadow": "node src/index.js --shadow-mode",
+    "dev": "nodemon src/index.js",
+    "test": "jest",
+    "db:init": "node scripts/init-db.js",
+    "db:migrate": "node scripts/migrate-db.js",
+    "backtest": "node scripts/backtest.js",
+    "optimize": "node scripts/weekly-optimize.js"
+  },
+  "dependencies": {
+    "node-telegram-bot-api": "^0.64.0",
+    "telegram": "^2.20.5",
+    "input": "^1.0.1",
+    "node-fetch": "^3.3.2",
+    "axios": "^1.6.5",
+    "better-sqlite3": "^9.2.2",
+    "dotenv": "^16.3.1",
+    "date-fns": "^3.0.6",
+    "@solana/web3.js": "^1.87.6",
+    "ethers": "^6.10.0",
+    "zod": "^3.22.4",
+    "csv-parse": "^5.5.3",
+    "csv-stringify": "^6.4.5"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.3",
+    "jest": "^29.7.0",
+    "@types/node": "^20.11.5"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "crypto",
+    "trading",
+    "sentiment-analysis",
+    "arbitrage",
+    "solana",
+    "bsc"
+  ],
+  "author": "",
+  "license": "MIT"
+}
