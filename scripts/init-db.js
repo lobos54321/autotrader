@@ -3,18 +3,23 @@ import Database from 'better-sqlite3';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import fs from 'fs';
+import dotenv from 'dotenv';
+
+dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const projectRoot = join(__dirname, '..');
 
+// Use DB_PATH from env, or fallback to ./data
+const dbPath = process.env.DB_PATH || join(projectRoot, 'data', 'sentiment_arb.db');
+const dataDir = dirname(dbPath);
+
 // Ensure data directory exists
-const dataDir = join(projectRoot, 'data');
 if (!fs.existsSync(dataDir)) {
   fs.mkdirSync(dataDir, { recursive: true });
 }
 
-const dbPath = join(dataDir, 'sentiment_arb.db');
 const db = new Database(dbPath);
 
 console.log('🗄️  Initializing database schema...');
