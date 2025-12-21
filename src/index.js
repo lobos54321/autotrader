@@ -30,6 +30,7 @@ import GrokTwitterClient from './social/grok-twitter-client.js';
 import { PermanentBlacklistService } from './database/permanent-blacklist.js';
 import { SignalSourceOptimizer } from './scoring/signal-source-optimizer.js';
 import { ShadowPriceTracker } from './tracking/shadow-price-tracker.js';
+import { startDashboardServer } from './web/dashboard-server.js';
 
 dotenv.config();
 
@@ -256,6 +257,11 @@ class SentimentArbitrageSystem {
   async start() {
     try {
       console.log('▶️  Starting Sentiment Arbitrage System...\n');
+
+      // 0. Start Dashboard server
+      console.log('🌐 Starting Dashboard server...');
+      startDashboardServer();
+      console.log('   ✅ Dashboard server active\n');
 
       // 1. Start Telegram listener
       console.log('📱 Starting Telegram signal listener...');
