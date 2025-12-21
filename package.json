@@ -16,7 +16,8 @@
     "narratives:update": "node scripts/update-narratives.js",
     "influencers:discover": "node scripts/discover-influencers.js",
     "weekly:maintenance": "node scripts/weekly-maintenance.js",
-    "dashboard": "node scripts/dashboard.js"
+    "dashboard": "node scripts/dashboard.js",
+    "simulate": "node scripts/run-simulation.js"
   },
   "dependencies": {
     "node-telegram-bot-api": "^0.64.0",

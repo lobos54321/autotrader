@@ -271,25 +271,26 @@ function renderDashboard(data) {
     
     <!-- 止盈止损策略 -->
     <div class="card">
-      <h2>⚙️ 止盈止损策略</h2>
+      <h2>⚙️ 策略 v3：保本 + AI动态管理</h2>
       <div class="grid" style="grid-template-columns: repeat(3, 1fr);">
         <div class="exit-strategy">
-          <h3>🚨 Tier 1: 风险退出</h3>
-          <div class="exit-rule"><span>关键钱包抛售</span><span>>30%</span></div>
-          <div class="exit-rule"><span>Top10集中度增加</span><span>>15%</span></div>
-          <div class="exit-rule"><span>滑点恶化</span><span>>3x</span></div>
+          <h3>🛑 止损</h3>
+          <div class="exit-rule"><span>最大亏损</span><span class="pnl-negative">-50%</span></div>
+          <div class="exit-rule"><span>流动性崩溃</span><span class="pnl-negative">&lt;50%</span></div>
         </div>
         <div class="exit-strategy">
-          <h3>📉 Tier 2: 情绪衰退</h3>
-          <div class="exit-rule"><span>TG加速度衰减</span><span><50%</span></div>
-          <div class="exit-rule"><span>TG加速度负值</span><span><-10</span></div>
+          <h3>💰 保本</h3>
+          <div class="exit-rule"><span>触发点</span><span class="pnl-positive">+50%</span></div>
+          <div class="exit-rule"><span>卖出比例</span><span>60%</span></div>
+          <div class="exit-rule"><span>回收本金</span><span>≈90%</span></div>
+          <div class="exit-rule"><span>剩余利润仓</span><span>40%</span></div>
         </div>
         <div class="exit-strategy">
-          <h3>📊 Tier 3: 标准SOP</h3>
-          <div class="exit-rule"><span>止损</span><span class="pnl-negative">-20%</span></div>
-          <div class="exit-rule"><span>止盈1 (卖50%)</span><span class="pnl-positive">+30%</span></div>
-          <div class="exit-rule"><span>止盈2 (卖全部)</span><span class="pnl-positive">+50%</span></div>
-          <div class="exit-rule"><span>最大持仓时间</span><span>3小时</span></div>
+          <h3>🤖 利润仓 AI管理</h3>
+          <div class="exit-rule"><span>热度下降</span><span>卖1/3</span></div>
+          <div class="exit-rule"><span>聪明钱减持</span><span>卖1/3</span></div>
+          <div class="exit-rule"><span>横盘30分钟</span><span>卖1/3</span></div>
+          <div class="exit-rule"><span>紧急退出</span><span>全卖</span></div>
         </div>
       </div>
     </div>

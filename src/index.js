@@ -25,7 +25,7 @@ import { SoftAlphaScorer } from './scoring/soft-alpha-score.js';
 import { DecisionMatrix } from './decision/decision-matrix.js';
 import { PositionSizer } from './decision/position-sizer.js';
 import { GMGNTelegramExecutor } from './execution/gmgn-telegram-executor.js';
-import { PositionMonitor } from './execution/position-monitor.js';
+import { PositionMonitorV2 } from './execution/position-monitor-v2.js';
 import GrokTwitterClient from './social/grok-twitter-client.js';
 import { PermanentBlacklistService } from './database/permanent-blacklist.js';
 import { SignalSourceOptimizer } from './scoring/signal-source-optimizer.js';
@@ -49,7 +49,7 @@ class SentimentArbitrageSystem {
     this.decisionEngine = new DecisionMatrix(this.config, this.db);
     this.positionSizer = new PositionSizer(this.config, this.db);
     this.executor = new GMGNTelegramExecutor(this.config, this.db);
-    this.positionMonitor = new PositionMonitor(this.config, this.db);
+    this.positionMonitor = new PositionMonitorV2(this.config, this.db);
     this.grokClient = new GrokTwitterClient();
     this.blacklistService = new PermanentBlacklistService(this.db);
     
