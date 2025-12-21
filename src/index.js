@@ -658,12 +658,6 @@ class SentimentArbitrageSystem {
       // ==========================================
       console.log('\n⚡ [6/7] Executing trade...');
 
-      if (!this.config.AUTO_BUY_ENABLED) {
-        console.log(`   ⏸️  Auto-buy disabled - Skipping execution`);
-        this.markSignalProcessed(id);
-        return;
-      }
-
       const tradeParams = {
         chain,
         token_ca,
@@ -672,24 +666,42 @@ class SentimentArbitrageSystem {
         symbol: snapshot.symbol || 'Unknown'
       };
 
-      const executionResult = await this.executor.executeBuy(tradeParams);
-
-      if (executionResult.success) {
-        console.log(`   ✅ Execution successful!`);
-        console.log(`      Trade ID: ${executionResult.trade_id}`);
-        console.log(`      Method: ${executionResult.method}`);
-        if (executionResult.tx_hash) {
-          console.log(`      TX: ${executionResult.tx_hash}`);
-        }
-        this.stats.executions_success++;
-
-        // Record position - use positionCheck.adjusted_size
+      // Shadow mode or auto-buy disabled: record virtual position without execution
+      if (this.config.SHADOW_MODE || !this.config.AUTO_BUY_ENABLED) {
+        console.log(`   🎭 Shadow mode - Recording virtual position (no execution)`);
+        
+        const virtualExecutionResult = {
+          success: true,
+          trade_id: `shadow_${Date.now()}_${Math.random().toString(36).substring(7)}`,
+          method: 'shadow',
+          tx_hash: null
+        };
+        
         const finalPositionSize = positionCheck.adjusted_size || tradeParams.position_size;
-        this.recordPosition(signal, snapshot, scoreResult, finalPositionSize, executionResult);
-
+        this.recordPosition(signal, snapshot, scoreResult, finalPositionSize, virtualExecutionResult, true);
+        this.stats.executions_success++;
+        
       } else {
-        console.log(`   ❌ Execution failed: ${executionResult.error}`);
-        this.stats.executions_failed++;
+        // Live mode: execute real trade
+        const executionResult = await this.executor.executeBuy(tradeParams);
+
+        if (executionResult.success) {
+          console.log(`   ✅ Execution successful!`);
+          console.log(`      Trade ID: ${executionResult.trade_id}`);
+          console.log(`      Method: ${executionResult.method}`);
+          if (executionResult.tx_hash) {
+            console.log(`      TX: ${executionResult.tx_hash}`);
+          }
+          this.stats.executions_success++;
+
+          // Record position - use positionCheck.adjusted_size
+          const finalPositionSize = positionCheck.adjusted_size || tradeParams.position_size;
+          this.recordPosition(signal, snapshot, scoreResult, finalPositionSize, executionResult, false);
+
+        } else {
+          console.log(`   ❌ Execution failed: ${executionResult.error}`);
+          this.stats.executions_failed++;
+        }
       }
 
       // ==========================================
@@ -722,8 +734,9 @@ class SentimentArbitrageSystem {
 
   /**
    * Record position in database
+   * @param {boolean} isShadow - Whether this is a shadow/virtual position
    */
-  recordPosition(signal, snapshot, scoreResult, positionSize, executionResult) {
+  recordPosition(signal, snapshot, scoreResult, positionSize, executionResult, isShadow = false) {
     try {
       // Handle positionSize - could be an object or a number
       let nativeSize, usdSize, confidence, kellyFraction;
@@ -749,8 +762,8 @@ class SentimentArbitrageSystem {
           alpha_score, confidence, kelly_fraction,
           entry_liquidity_usd, entry_top10_holders, entry_slippage_bps,
           entry_tg_accel, entry_risk_wallets,
-          trade_id, entry_tx_hash, status
-        ) VALUES (?, ?, ?, ?, datetime('now'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open')
+          trade_id, entry_tx_hash, status, is_shadow
+        ) VALUES (?, ?, ?, ?, datetime('now'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)
       `).run(
         signal.chain,
         signal.token_ca,
@@ -768,7 +781,8 @@ class SentimentArbitrageSystem {
         scoreResult.breakdown?.tg_spread?.score || 0,
         JSON.stringify(snapshot.key_risk_wallets || []),
         executionResult.trade_id,
-        executionResult.tx_hash || null
+        executionResult.tx_hash || null,
+        isShadow ? 1 : 0
       );
 
       console.log('   ✅ Position recorded in database');
