@@ -17,7 +17,7 @@ export class RiskManager {
     // 风险参数
     this.params = {
       // 入场标准
-      MIN_SCORE_TO_TRADE: 70, // 最低 70 分才能交易
+      MIN_SCORE_TO_TRADE: 50, // 最低 50 分才能交易（从 70 降低，让更多信号进入模拟）
       
       // 时间衰减
       TIME_DECAY: {

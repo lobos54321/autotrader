@@ -301,7 +301,7 @@ function renderDashboard(data) {
       <div class="grid" style="grid-template-columns: repeat(4, 1fr);">
         <div class="exit-strategy">
           <h3>📊 入场标准</h3>
-          <div class="exit-rule"><span>最低分数</span><span>≥70分</span></div>
+          <div class="exit-rule"><span>最低分数</span><span>≥50分</span></div>
           <div class="exit-rule"><span>5分钟内</span><span>满分</span></div>
           <div class="exit-rule"><span>5-15分钟</span><span>打8折</span></div>
           <div class="exit-rule"><span>30分钟后</span><span>不参与</span></div>
