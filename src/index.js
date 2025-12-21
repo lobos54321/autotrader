@@ -512,29 +512,77 @@ class SentimentArbitrageSystem {
       const signalTime = new Date(signal.timestamp).getTime();
       const timeLagMinutes = Math.floor((Date.now() - signalTime) / 60000);
 
+      // ==========================================
+      // 查询 15 分钟内有多少频道提到同一个 token（信号聚合）
+      // ==========================================
+      let tg_ch_15m = 1;
+      let tg_clusters_15m = 1;
+      let promotedChannels = [];
+      
+      try {
+        const fifteenMinutesAgo = Math.floor(Date.now() / 1000) - (15 * 60);
+        
+        // 查询 15 分钟内提到同一个 token 的所有信号
+        const recentSignals = this.db.prepare(`
+          SELECT DISTINCT channel_name, created_at
+          FROM telegram_signals
+          WHERE token_ca = ? AND created_at >= ?
+          ORDER BY created_at ASC
+        `).all(token_ca, fifteenMinutesAgo);
+        
+        if (recentSignals.length > 0) {
+          tg_ch_15m = recentSignals.length;
+          
+          // 获取每个频道的 tier
+          const uniqueChannels = [...new Set(recentSignals.map(s => s.channel_name))];
+          tg_clusters_15m = uniqueChannels.length;
+          
+          promotedChannels = uniqueChannels.map(ch => {
+            const chInfo = this.db.prepare(`
+              SELECT tier FROM telegram_channels 
+              WHERE channel_name = ? OR channel_username LIKE ?
+            `).get(ch, `%${ch}%`);
+            return {
+              name: ch,
+              tier: chInfo?.tier || 'C',
+              timestamp: signalTime
+            };
+          });
+          
+          if (tg_ch_15m > 1) {
+            console.log(`   📢 信号聚合: ${tg_ch_15m} 条信号来自 ${tg_clusters_15m} 个频道`);
+          }
+        }
+      } catch (e) {
+        console.log(`   ⚠️ 信号聚合查询失败: ${e.message}`);
+      }
+
       const socialData = {
         // Telegram data - structured for scoring
-        total_mentions: 1,
-        unique_channels: 1,
-        tg_ch_15m: 1,  // Number of channels in 15 min window
-        tg_clusters_15m: 1,  // Number of independent clusters
-        tg_velocity: 0.5,  // Default velocity
+        total_mentions: tg_ch_15m,
+        unique_channels: tg_clusters_15m,
+        tg_ch_15m: tg_ch_15m,  // 实际的频道数量（从数据库查询）
+        tg_clusters_15m: tg_clusters_15m,  // 实际的独立频道数
+        tg_velocity: tg_ch_15m > 1 ? tg_ch_15m / 15 : 0.5,  // 实际速度
         tg_accel: 0,
         tg_time_lag: timeLagMinutes,  // Minutes since first mention
-        N_total: 1,
+        N_total: tg_ch_15m,
         
         // Channel info for AI Influencer System
         channel_name: signal.channel_name,
         
         // Promoted channels with tier info (required for Influence scoring)
-        promoted_channels: [{
+        // 使用聚合后的所有频道
+        promoted_channels: promotedChannels.length > 0 ? promotedChannels : [{
           name: signal.channel_name,
           tier: channelTier,
           timestamp: signalTime
         }],
         
-        // Legacy field
-        channels: [signal.channel_name],
+        // Legacy field - 所有提到这个 token 的频道
+        channels: promotedChannels.length > 0 
+          ? promotedChannels.map(c => c.name) 
+          : [signal.channel_name],
         message_timestamp: signal.timestamp,
 
         // Twitter data (from Grok API)
