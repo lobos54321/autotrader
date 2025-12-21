@@ -271,26 +271,35 @@ function renderDashboard(data) {
     
     <!-- 止盈止损策略 -->
     <div class="card">
-      <h2>⚙️ 策略 v3：保本 + AI动态管理</h2>
-      <div class="grid" style="grid-template-columns: repeat(3, 1fr);">
+      <h2>⚙️ 策略 v3 (MVP 3.0)：翻倍出本 + AI动态管理</h2>
+      <div class="grid" style="grid-template-columns: repeat(4, 1fr);">
         <div class="exit-strategy">
-          <h3>🛑 止损</h3>
-          <div class="exit-rule"><span>最大亏损</span><span class="pnl-negative">-50%</span></div>
+          <h3>🛑 止损（铁律）</h3>
+          <div class="exit-rule"><span>价格止损</span><span class="pnl-negative">-50%</span></div>
+          <div class="exit-rule"><span>时间止损(SOL)</span><span class="pnl-negative">60分钟</span></div>
+          <div class="exit-rule"><span>时间止损(BSC)</span><span class="pnl-negative">2小时</span></div>
           <div class="exit-rule"><span>流动性崩溃</span><span class="pnl-negative">&lt;50%</span></div>
         </div>
         <div class="exit-strategy">
-          <h3>💰 保本</h3>
-          <div class="exit-rule"><span>触发点</span><span class="pnl-positive">+50%</span></div>
-          <div class="exit-rule"><span>卖出比例</span><span>60%</span></div>
-          <div class="exit-rule"><span>回收本金</span><span>≈90%</span></div>
-          <div class="exit-rule"><span>剩余利润仓</span><span>40%</span></div>
+          <h3>💰 翻倍出本</h3>
+          <div class="exit-rule"><span>触发点</span><span class="pnl-positive">+100%</span></div>
+          <div class="exit-rule"><span>卖出比例</span><span>50%</span></div>
+          <div class="exit-rule"><span>回收本金</span><span>100%</span></div>
+          <div class="exit-rule"><span>剩余利润仓</span><span>50% (Free)</span></div>
+        </div>
+        <div class="exit-strategy">
+          <h3>🚨 紧急逃生</h3>
+          <div class="exit-rule"><span>Dev出逃</span><span class="pnl-negative">全卖</span></div>
+          <div class="exit-rule"><span>聪明钱出逃</span><span class="pnl-negative">全卖</span></div>
+          <div class="exit-rule"><span>Rug迹象</span><span class="pnl-negative">全卖</span></div>
+          <div class="exit-rule"><span>Top10砸盘</span><span class="pnl-negative">全卖</span></div>
         </div>
         <div class="exit-strategy">
           <h3>🤖 利润仓 AI管理</h3>
           <div class="exit-rule"><span>热度下降</span><span>卖1/3</span></div>
           <div class="exit-rule"><span>聪明钱减持</span><span>卖1/3</span></div>
           <div class="exit-rule"><span>横盘30分钟</span><span>卖1/3</span></div>
-          <div class="exit-rule"><span>紧急退出</span><span>全卖</span></div>
+          <div class="exit-rule"><span>回撤50%</span><span>卖1/3</span></div>
         </div>
       </div>
     </div>

@@ -1,12 +1,13 @@
 /**
- * Position Monitor v2 - 保本 + AI动态管理策略
+ * Position Monitor v3 - 翻倍出本 + AI动态管理策略 (MVP 3.0)
  *
- * 核心策略：
- * 1. 止损：-50%（最大亏损底线）
- * 2. 保本：+50% 卖 60%（回收 90% 本金）
+ * 核心策略（猎手思维）：
+ * 1. 止损：-50%（最大亏损底线）+ 时间止损（SOL 60min / BSC 2h）
+ * 2. 翻倍出本：+100% 卖 50%（收回本金，剩余全是利润）
  * 3. 利润仓：AI 实时监控，动态决定卖出时机
+ * 4. 紧急逃生：Dev出逃/聪明钱出逃/流动性崩溃 → 立即全卖
  *
- * 目标：先保本，再博金狗
+ * 目标：翻倍出本，剩余死拿（Free Moonbag）
  */
 
 import { SolanaSnapshotService } from '../inputs/chain-snapshot-sol.js';
@@ -27,14 +28,16 @@ export class PositionMonitorV2 {
     this.pollIntervalMs = config.POSITION_MONITOR_INTERVAL_MS || 60000; // 1 分钟
     this.isRunning = false;
 
-    // 新策略阈值
+    // MVP 3.0 猎手策略阈值
     this.strategy = {
-      // 止损
+      // 止损（铁律）
       STOP_LOSS: -0.50, // -50% 止损
+      TIME_STOP_SOL_MINUTES: 60, // SOL 链 60分钟不涨就走
+      TIME_STOP_BSC_MINUTES: 120, // BSC 链 2小时不涨就走
 
-      // 保本
-      BREAKEVEN_TRIGGER: 0.50, // +50% 触发保本
-      BREAKEVEN_SELL_PERCENT: 60, // 卖出 60%
+      // 翻倍出本（猎手思维）
+      BREAKEVEN_TRIGGER: 1.00, // +100% 触发出本（翻倍）
+      BREAKEVEN_SELL_PERCENT: 50, // 卖出 50%（收回本金）
 
       // 利润仓 AI 管理阈值
       HEAT_DECAY_THRESHOLD: 0.40, // 热度下降到入场时的 40%
@@ -42,14 +45,17 @@ export class PositionMonitorV2 {
       SIDEWAYS_TIMEOUT_MINUTES: 30, // 横盘超过 30 分钟
       MAX_DRAWDOWN_FROM_HIGH: 0.50, // 从最高点回撤 50%
 
-      // 紧急退出
+      // 紧急退出（逃生系统）
       LIQUIDITY_CRASH_THRESHOLD: 0.50, // 流动性下降 50%
+      DEV_DUMP_THRESHOLD: 0.10, // Dev 卖出超过 10% 持仓
+      TOP_HOLDER_DUMP_THRESHOLD: 0.05, // Top10 1分钟内卖出 5% 总供应量
     };
 
-    console.log('📊 Position Monitor v2 initialized');
-    console.log('   策略：保本 + AI动态管理');
+    console.log('📊 Position Monitor v3 (MVP 3.0) initialized');
+    console.log('   策略：翻倍出本 + AI动态管理');
     console.log(`   止损：${this.strategy.STOP_LOSS * 100}%`);
-    console.log(`   保本：+${this.strategy.BREAKEVEN_TRIGGER * 100}% 卖 ${this.strategy.BREAKEVEN_SELL_PERCENT}%`);
+    console.log(`   时间止损：SOL ${this.strategy.TIME_STOP_SOL_MINUTES}min / BSC ${this.strategy.TIME_STOP_BSC_MINUTES}min`);
+    console.log(`   翻倍出本：+${this.strategy.BREAKEVEN_TRIGGER * 100}% 卖 ${this.strategy.BREAKEVEN_SELL_PERCENT}%`);
     console.log(`   监控间隔：${this.pollIntervalMs / 1000}s`);
   }
 
@@ -63,7 +69,7 @@ export class PositionMonitorV2 {
     }
 
     this.isRunning = true;
-    console.log('▶️  Position Monitor v2 started');
+    console.log('▶️  Position Monitor v3 started');
 
     // 初始监控
     await this.monitorAllPositions();
@@ -87,7 +93,7 @@ export class PositionMonitorV2 {
       this.monitorInterval = null;
     }
     this.isRunning = false;
-    console.log('⏹️  Position Monitor v2 stopped');
+    console.log('⏹️  Position Monitor v3 stopped');
   }
 
   /**
@@ -166,10 +172,17 @@ export class PositionMonitorV2 {
   }
 
   /**
-   * 未保本阶段的决策
+   * 未出本阶段的决策（翻倍前）
    */
   evaluatePreBreakeven(position, snapshot, pnl, signals) {
-    // 检查止损
+    const chain = position.chain;
+    const entryTime = new Date(position.entry_time || position.created_at);
+    const holdingMinutes = (Date.now() - entryTime.getTime()) / 1000 / 60;
+    const timeStopMinutes = chain === 'SOL' 
+      ? this.strategy.TIME_STOP_SOL_MINUTES 
+      : this.strategy.TIME_STOP_BSC_MINUTES;
+
+    // 1. 检查价格止损（铁律）
     if (pnl.pnl_percent <= this.strategy.STOP_LOSS * 100) {
       return {
         action: 'STOP_LOSS',
@@ -178,7 +191,16 @@ export class PositionMonitorV2 {
       };
     }
 
-    // 检查流动性崩溃
+    // 2. 检查时间止损（逻辑证伪）
+    if (holdingMinutes >= timeStopMinutes && pnl.pnl_percent < 20) {
+      return {
+        action: 'TIME_STOP',
+        sell_percent: 100,
+        reason: `时间止损：持仓${holdingMinutes.toFixed(0)}分钟未起飞（阈值${timeStopMinutes}min），逻辑证伪`
+      };
+    }
+
+    // 3. 检查流动性崩溃
     if (signals.liquidity_ratio < this.strategy.LIQUIDITY_CRASH_THRESHOLD) {
       return {
         action: 'EMERGENCY_EXIT',
@@ -187,37 +209,16 @@ export class PositionMonitorV2 {
       };
     }
 
-    // 检查保本触发
-    if (pnl.pnl_percent >= this.strategy.BREAKEVEN_TRIGGER * 100) {
-      return {
-        action: 'BREAKEVEN',
-        sell_percent: this.strategy.BREAKEVEN_SELL_PERCENT,
-        reason: `保本触发：+${pnl.pnl_percent.toFixed(1)}% ≥ +${this.strategy.BREAKEVEN_TRIGGER * 100}%`
-      };
-    }
-
-    return {
-      action: 'HOLD',
-      reason: `等待保本 (当前 ${pnl.pnl_percent >= 0 ? '+' : ''}${pnl.pnl_percent.toFixed(1)}%, 目标 +${this.strategy.BREAKEVEN_TRIGGER * 100}%)`
-    };
-  }
-
-  /**
-   * 利润仓阶段的 AI 动态决策
-   */
-  evaluateProfitPosition(position, snapshot, pnl, signals) {
-    const reasons = [];
-    let sellSignals = 0;
-
-    // 1. 检查紧急退出条件
-    if (signals.liquidity_ratio < this.strategy.LIQUIDITY_CRASH_THRESHOLD) {
+    // 4. 检查 Dev 出逃
+    if (signals.dev_dumping) {
       return {
         action: 'EMERGENCY_EXIT',
         sell_percent: 100,
-        reason: `🚨 流动性崩溃：${(signals.liquidity_ratio * 100).toFixed(0)}%`
+        reason: `🚨 Dev 出逃`
       };
     }
 
+    // 5. 检查聪明钱出逃（一票否决）
     if (signals.smart_money_exit) {
       return {
         action: 'EMERGENCY_EXIT',
@@ -226,6 +227,60 @@ export class PositionMonitorV2 {
       };
     }
 
+    // 6. 检查翻倍出本触发
+    if (pnl.pnl_percent >= this.strategy.BREAKEVEN_TRIGGER * 100) {
+      return {
+        action: 'BREAKEVEN',
+        sell_percent: this.strategy.BREAKEVEN_SELL_PERCENT,
+        reason: `🎯 翻倍出本：+${pnl.pnl_percent.toFixed(1)}% ≥ +${this.strategy.BREAKEVEN_TRIGGER * 100}%`
+      };
+    }
+
+    return {
+      action: 'HOLD',
+      reason: `等待翻倍 (当前 ${pnl.pnl_percent >= 0 ? '+' : ''}${pnl.pnl_percent.toFixed(1)}%, 目标 +${this.strategy.BREAKEVEN_TRIGGER * 100}%, 持仓 ${holdingMinutes.toFixed(0)}min)`
+    };
+  }
+
+  /**
+   * 利润仓阶段的 AI 动态决策（Free Moonbag 阶段）
+   */
+  evaluateProfitPosition(position, snapshot, pnl, signals) {
+    const reasons = [];
+    let sellSignals = 0;
+
+    // ========================================
+    // 1. 紧急逃生条件（立即全卖，不问价格）
+    // ========================================
+    
+    // 流动性崩溃
+    if (signals.liquidity_ratio < this.strategy.LIQUIDITY_CRASH_THRESHOLD) {
+      return {
+        action: 'EMERGENCY_EXIT',
+        sell_percent: 100,
+        reason: `🚨 流动性崩溃：${(signals.liquidity_ratio * 100).toFixed(0)}%`
+      };
+    }
+
+    // Dev 出逃
+    if (signals.dev_dumping) {
+      return {
+        action: 'EMERGENCY_EXIT',
+        sell_percent: 100,
+        reason: `🚨 Dev 出逃：持仓下降 ${(Math.abs(signals.dev_balance_change) * 100).toFixed(0)}%`
+      };
+    }
+
+    // 聪明钱出逃
+    if (signals.smart_money_exit) {
+      return {
+        action: 'EMERGENCY_EXIT',
+        sell_percent: 100,
+        reason: `🚨 聪明钱出逃`
+      };
+    }
+
+    // Rug 迹象
     if (signals.rug_detected) {
       return {
         action: 'EMERGENCY_EXIT',
@@ -234,7 +289,9 @@ export class PositionMonitorV2 {
       };
     }
 
-    // 2. 检查逐步卖出条件
+    // ========================================
+    // 2. 逐步卖出条件（每触发一个卖 1/3）
+    // ========================================
     
     // 热度下降
     if (signals.heat_ratio < this.strategy.HEAT_DECAY_THRESHOLD) {
@@ -251,7 +308,7 @@ export class PositionMonitorV2 {
     // 横盘太久
     if (signals.sideways_minutes > this.strategy.SIDEWAYS_TIMEOUT_MINUTES) {
       sellSignals++;
-      reasons.push(`横盘${signals.sideways_minutes}分钟`);
+      reasons.push(`横盘${signals.sideways_minutes.toFixed(0)}分钟`);
     }
 
     // 从最高点回撤过多
@@ -281,7 +338,9 @@ export class PositionMonitorV2 {
       };
     }
 
-    // 3. 检查继续持有条件
+    // ========================================
+    // 3. 继续持有条件（死拿等百倍）
+    // ========================================
     const holdReasons = [];
     if (signals.heat_rising) holdReasons.push('热度↑');
     if (signals.smart_money_buying) holdReasons.push('聪明钱加仓');
@@ -290,12 +349,12 @@ export class PositionMonitorV2 {
 
     return {
       action: 'HOLD',
-      reason: holdReasons.length > 0 ? `继续持有: ${holdReasons.join(', ')}` : '无卖出信号'
+      reason: holdReasons.length > 0 ? `🚀 死拿: ${holdReasons.join(', ')}` : '无卖出信号，继续持有'
     };
   }
 
   /**
-   * 获取市场信号
+   * 获取市场信号（MVP 3.0 增强版）
    */
   async getMarketSignals(position, snapshot) {
     const signals = {
@@ -311,6 +370,10 @@ export class PositionMonitorV2 {
       smart_money_selling: false,
       smart_money_buying: false,
       smart_money_exit: false,
+
+      // Dev 监控（新增）
+      dev_dumping: false,
+      dev_balance_change: 0,
 
       // 价格
       drawdown_from_high: 0,
@@ -346,15 +409,30 @@ export class PositionMonitorV2 {
       // 横盘检测
       signals.sideways_minutes = this.calculateSidewaysTime(position);
 
-      // 聪明钱动向（简化版，基于 Top10 变化）
-      const top10Change = (snapshot.top10_percent || 0) - (position.entry_top10_holders || 0);
+      // 聪明钱动向（基于 Top10 变化）
+      const entryTop10 = position.entry_top10_holders || 0;
+      const currentTop10 = snapshot.top10_percent || 0;
+      const top10Change = currentTop10 - entryTop10;
+      
       if (top10Change > 10) {
         signals.smart_money_buying = true;
       } else if (top10Change < -15) {
         signals.smart_money_selling = true;
       }
+      
+      // 聪明钱出逃判定（Top10 快速下降超过 30%）
       if (top10Change < -30) {
         signals.smart_money_exit = true;
+      }
+
+      // Dev 监控（简化版 - 基于 Top1 持仓变化）
+      // 如果 Top1 持仓大幅下降（假设 Top1 是 Dev）
+      const entryTop1 = position.entry_top1_holder || 0;
+      const currentTop1 = snapshot.top1_percent || 0;
+      if (entryTop1 > 0 && currentTop1 < entryTop1 * 0.9) {
+        // Top1 持仓下降超过 10%
+        signals.dev_dumping = true;
+        signals.dev_balance_change = (currentTop1 - entryTop1) / entryTop1;
       }
 
     } catch (error) {
@@ -581,7 +659,7 @@ export class PositionMonitorV2 {
 
       return {
         is_running: this.isRunning,
-        strategy: 'v2 - 保本 + AI动态管理',
+        strategy: 'v3 - 翻倍出本 + AI动态管理 (MVP 3.0)',
         positions: stats
       };
     } catch (error) {
