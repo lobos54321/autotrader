@@ -20,7 +20,7 @@ export class ChainSnapshotAggregator {
 
     // Cache to avoid duplicate requests within short time
     this.cache = new Map();
-    this.cacheT TL = 60 * 1000; // 60 seconds
+    this.cacheTTL = 60 * 1000; // 60 seconds
   }
 
   /**

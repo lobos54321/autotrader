@@ -13,6 +13,8 @@
 
 import TGSpreadScoring from './tg-spread.js';
 import NarrativeDetector from './narrative-detector.js';
+import { AINarrativeSystem } from './ai-narrative-system.js';
+import { AIInfluencerSystem } from './ai-influencer-system.js';
 
 export class SoftAlphaScorer {
   constructor(config, db) {
@@ -23,6 +25,14 @@ export class SoftAlphaScorer {
     // Initialize component scorers
     this.tgSpreadScorer = new TGSpreadScoring(config, db);
     this.narrativeDetector = new NarrativeDetector();
+    
+    // Initialize AI-powered systems
+    this.aiNarrativeSystem = new AINarrativeSystem(config, db);
+    this.aiInfluencerSystem = new AIInfluencerSystem(config, db);
+    
+    // Flags to use AI systems (can be toggled)
+    this.useAINarrative = true;
+    this.useAIInfluencer = true;
   }
 
   /**
@@ -35,9 +45,51 @@ export class SoftAlphaScorer {
   async calculate(socialData, tokenData) {
     console.log(`🎯 [Soft Score] Calculating for ${tokenData.token_ca}`);
 
-    // Component scores
-    const narrative = this.calculateNarrative(socialData, tokenData);
-    const influence = this.calculateInfluence(socialData);
+    // Component scores - use AI narrative if enabled
+    let narrative;
+    if (this.useAINarrative) {
+      // Prepare twitter data for AI narrative
+      const twitterData = {
+        mention_count: socialData.twitter_mentions || 0,
+        sentiment: socialData.twitter_sentiment || 'neutral',
+        unique_authors: socialData.twitter_unique_authors || 0
+      };
+      
+      narrative = await this.aiNarrativeSystem.scoreNarrative(
+        tokenData.symbol,
+        tokenData.name,
+        twitterData
+      );
+      
+      // Log AI narrative detection
+      if (narrative.narrative) {
+        console.log(`   📖 AI Narrative: ${narrative.narrative} (weight: ${narrative.breakdown?.narrative_weight?.toFixed(1) || 'N/A'}/10, stage: ${narrative.breakdown?.lifecycle_stage || 'unknown'})`);
+      }
+    } else {
+      narrative = this.calculateNarrative(socialData, tokenData);
+    }
+    
+    // Use AI Influencer System if enabled
+    let influence;
+    if (this.useAIInfluencer) {
+      // Prepare twitter data for influence detection
+      const twitterData = {
+        mention_count: socialData.twitter_mentions || 0,
+        unique_authors: socialData.twitter_unique_authors || 0,
+        top_tweets: socialData.top_tweets || []
+      };
+      
+      // Get channel name from socialData
+      const channelName = socialData.channels?.[0] || socialData.channel_name || '';
+      
+      influence = this.aiInfluencerSystem.calculateInfluenceScore(channelName, twitterData);
+      
+      // Log AI influence detection
+      console.log(`   👥 AI Influence: Channel ${influence.breakdown.channel_tier} (${influence.breakdown.channel_score}pts), KOLs: ${influence.breakdown.kol_mentions.length} (${influence.breakdown.kol_score}pts)`);
+    } else {
+      influence = this.calculateInfluence(socialData);
+    }
+    
     const tgSpread = this.tgSpreadScorer.calculate(socialData, tokenData.token_ca);
     const graph = this.calculateGraph(socialData);
     const source = this.calculateSource(socialData);
@@ -140,7 +192,8 @@ export class SoftAlphaScorer {
    * Influence Scoring (0-25 points)
    *
    * - TG channel quality (0-15): Based on Tier distribution
-   * - X Tier1 hit (0-10): If Tier1 KOL mentioned
+   * - X KOL participation (0-10): Based on Twitter KOL count
+   * - Unknown channel base score: 3 points (not penalized for new sources)
    */
   calculateInfluence(socialData) {
     let score = 0;
@@ -154,28 +207,47 @@ export class SoftAlphaScorer {
     if (channels.length > 0) {
       const tierACounts = channels.filter(ch => ch.tier === 'A').length;
       const tierBCounts = channels.filter(ch => ch.tier === 'B').length;
+      const tierCCounts = channels.filter(ch => ch.tier === 'C').length;
       const blacklistCounts = channels.filter(ch => ch.tier === 'BLACKLIST').length;
 
       if (blacklistCounts > 0) {
         score = 0;
-        reasons.push(`Blacklisted channels detected: ${blacklistCounts}`);
+        reasons.push(`⚠️ Blacklisted channels detected: ${blacklistCounts}`);
         return { score, reasons };
       }
 
-      const channelScore = tierACounts * 3 + tierBCounts * 1.5;
+      // Calculate channel score
+      // Tier A = 3 points, Tier B = 1.5 points, Tier C (unknown) = 0.5 points (base)
+      const channelScore = tierACounts * 3 + tierBCounts * 1.5 + tierCCounts * 0.5;
       score += Math.min(15, channelScore);
 
       if (tierACounts >= 2) {
         reasons.push(`Strong channel support: ${tierACounts} Tier A channels`);
       } else if (tierACounts >= 1) {
         reasons.push(`Decent channel support: ${tierACounts} Tier A, ${tierBCounts} Tier B`);
+      } else if (tierBCounts >= 1) {
+        reasons.push(`Moderate channel support: ${tierBCounts} Tier B channels`);
       } else {
-        reasons.push(`Weak channel support: mostly Tier B/C`);
+        // Unknown channel - give base score instead of 0
+        score = Math.max(score, 3);
+        reasons.push(`Unknown channel source (base score applied)`);
       }
+    } else {
+      // No channel info at all - give minimal base score
+      score = 2;
+      reasons.push('No channel information available');
     }
 
-    // X Tier1 hit (0-10)
-    if (socialData.x_tier1_hit) {
+    // X KOL participation (0-10)
+    // Now based on twitter_kol_count from Grok API
+    const kolCount = socialData.twitter_kol_count || 0;
+    if (kolCount >= 3) {
+      score += 10;
+      reasons.push(`Strong KOL support: ${kolCount} KOLs mentioned`);
+    } else if (kolCount >= 1) {
+      score += 5;
+      reasons.push(`KOL support: ${kolCount} KOL(s) mentioned`);
+    } else if (socialData.x_tier1_hit) {
       score += 10;
       reasons.push('Tier 1 KOL endorsement detected');
     }

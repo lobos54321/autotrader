@@ -42,13 +42,26 @@ export class NarrativeDetector {
         keywords: [
           'meme', 'pepe', 'doge', 'shib', 'wojak', 'community', 'viral', 'frog',
           'dog', 'cat', 'shiba', 'inu', 'floki', 'elon', 'dogecoin', 'shitcoin',
-          'fun', 'moon', 'ape', 'chad', 'based', 'giga'
+          'fun', 'moon', 'ape', 'chad', 'based', 'giga', 'bonk', 'wif', 'popcat',
+          'neiro', 'pnut', 'goat', 'moo', 'chill', 'retard', 'degen', 'send',
+          'trump', 'biden', 'christmas', 'santa', 'xmas', 'new year', 'holiday',
+          'elon', 'musk', 'tesla', 'x', 'twitter', 'grok',
+          'anime', 'waifu', 'neko', 'kawaii', 'uwu', 'chan',
+          'baby', 'mini', 'mega', 'super', 'ultra', 'hyper', 'turbo',
+          'rich', 'poor', 'lambo', 'yacht', 'wagmi', 'ngmi', 'gm', 'gn',
+          'fomo', 'hodl', 'diamond', 'hands', 'paper', 'rocket', 'fire',
+          'pumpfun', 'pump', 'gem', 'gold', 'golden', 'alpha', 'beta',
+          'king', 'queen', 'prince', 'god', 'devil', 'angel', 'demon',
+          'wizard', 'witch', 'magic', 'spell'
         ],
         patterns: [
-          /\b(pepe|doge|shib|wojak)\b/i,
+          /\b(pepe|doge|shib|wojak|bonk|wif|popcat|neiro|pnut|goat)\b/i,
           /meme\s+coin/i,
           /community\s+driven/i,
-          /\b(moon|ape|based)\b/i
+          /\b(moon|ape|based|degen|send|wagmi)\b/i,
+          /\b(trump|elon|musk)\b/i,
+          /\b(christmas|santa|xmas)\b/i,
+          /\b(anime|waifu|neko)\b/i
         ]
       },
 
@@ -166,6 +179,52 @@ export class NarrativeDetector {
           /p2e/i,
           /gamefi/i
         ]
+      },
+
+      // NEW: DeSci (Decentralized Science) - Hot in late 2024
+      'DeSci': {
+        weight: 8,
+        keywords: [
+          'desci', 'science', 'research', 'biotech', 'longevity', 'health',
+          'medicine', 'pharma', 'drug', 'clinical', 'lab', 'scientist',
+          'molecule', 'protein', 'gene', 'dna', 'bio', 'vita', 'dao'
+        ],
+        patterns: [
+          /desci/i,
+          /decentralized\s+science/i,
+          /bio\s*(tech|dao)/i,
+          /longevity/i
+        ]
+      },
+
+      // NEW: Pump.fun Native - Most pump.fun tokens
+      'PumpFun_Native': {
+        weight: 7,
+        keywords: [
+          'pump', 'pumpfun', 'bonding', 'curve', 'fair launch', 'no presale',
+          'community launch', 'stealth', 'organic'
+        ],
+        patterns: [
+          /pump\.fun/i,
+          /fair\s+launch/i,
+          /no\s+presale/i,
+          /stealth\s+launch/i
+        ]
+      },
+
+      // NEW: Celebrity/Influencer tokens
+      'Celebrity_Influencer': {
+        weight: 6,
+        keywords: [
+          'celebrity', 'influencer', 'youtuber', 'tiktoker', 'streamer',
+          'ansem', 'murad', 'hsaka', 'blknoiz', 'wizard', 'trader',
+          'alpha', 'call', 'group', 'paid'
+        ],
+        patterns: [
+          /\b(ansem|murad|hsaka)\b/i,
+          /kol\s+/i,
+          /influencer/i
+        ]
       }
     };
 
@@ -263,6 +322,14 @@ export class NarrativeDetector {
 
       // Cap at 25 points (max for Narrative component)
       score = Math.min(25, score);
+    } else {
+      // No narrative detected - give base score for pump.fun tokens
+      // This prevents penalizing new tokens with creative names
+      if (isPumpFun) {
+        score = 5;  // Base score for pump.fun tokens without clear narrative
+      } else {
+        score = 2;  // Minimal base score for other unknown tokens
+      }
     }
 
     return {
@@ -273,7 +340,9 @@ export class NarrativeDetector {
         base_weight: topNarrative ? topNarrative.weight : 0,
         confidence: topNarrative ? topNarrative.confidence : 0,
         twitter_validated: twitterData && topNarrative ?
-          this._twitterValidatesNarrative(twitterData, topNarrative) : false
+          this._twitterValidatesNarrative(twitterData, topNarrative) : false,
+        is_pump_fun: isPumpFun,
+        base_score_applied: !topNarrative
       }
     };
   }

@@ -11,6 +11,7 @@
  * 6. Position Sizer → Kelly-optimized position sizing
  * 7. GMGN Executor → Telegram Bot-based execution
  * 8. Position Monitor → Three-tier exit strategy
+ * 9. Signal Source Optimizer → Auto-optimize signal sources for higher win rate
  */
 
 import dotenv from 'dotenv';
@@ -19,6 +20,7 @@ import { TelegramUserListener } from './inputs/telegram-user-listener.js';
 import { SolanaSnapshotService } from './inputs/chain-snapshot-sol.js';
 import { BSCSnapshotService } from './inputs/chain-snapshot-bsc.js';
 import { HardGateFilter } from './gates/hard-gates.js';
+import { ExitGateFilter } from './gates/exit-gates.js';
 import { SoftAlphaScorer } from './scoring/soft-alpha-score.js';
 import { DecisionMatrix } from './decision/decision-matrix.js';
 import { PositionSizer } from './decision/position-sizer.js';
@@ -26,6 +28,7 @@ import { GMGNTelegramExecutor } from './execution/gmgn-telegram-executor.js';
 import { PositionMonitor } from './execution/position-monitor.js';
 import GrokTwitterClient from './social/grok-twitter-client.js';
 import { PermanentBlacklistService } from './database/permanent-blacklist.js';
+import { SignalSourceOptimizer } from './scoring/signal-source-optimizer.js';
 
 dotenv.config();
 
@@ -39,6 +42,7 @@ class SentimentArbitrageSystem {
     this.solService = new SolanaSnapshotService(this.config);
     this.bscService = new BSCSnapshotService(this.config);
     this.hardGateService = new HardGateFilter(this.config);
+    this.exitGateService = new ExitGateFilter(this.config);
     this.softScorer = new SoftAlphaScorer(this.config, this.db);
     this.decisionEngine = new DecisionMatrix(this.config, this.db);
     this.positionSizer = new PositionSizer(this.config, this.db);
@@ -46,10 +50,13 @@ class SentimentArbitrageSystem {
     this.positionMonitor = new PositionMonitor(this.config, this.db);
     this.grokClient = new GrokTwitterClient();
     this.blacklistService = new PermanentBlacklistService(this.db);
+    
+    // Signal Source Optimizer - auto-optimize for higher win rate
+    this.sourceOptimizer = new SignalSourceOptimizer(this.config, this.db);
 
     // System state
     this.isRunning = false;
-    this.processedSignals = new Set();
+    this.processedSignals = new Map();
     this.stats = {
       signals_received: 0,
       hard_gate_passed: 0,
@@ -112,7 +119,10 @@ class SentimentArbitrageSystem {
           excellent_channels: 8,
           good_channels: 5,
           min_channels: 3,
-          max_cluster_penalty: 20
+          max_cluster_penalty: 20,
+          ch_15m_high: 8,
+          min_clusters: 3,
+          matrix_penalty_threshold: 2
         },
         holder_quality: {
           max_top10_concentration: 30,
@@ -128,7 +138,13 @@ class SentimentArbitrageSystem {
         },
         x_validation: {
           min_unique_authors: 2,
-          multiplier_below_threshold: 0.8
+          multiplier_below_threshold: 0.8,
+          score_multiplier_if_low: 0.8
+        },
+        source: {
+          time_lag_excellent_min: 5,
+          time_lag_good_min: 15,
+          time_lag_poor_min: 30
         }
       },
 
@@ -139,7 +155,8 @@ class SentimentArbitrageSystem {
           min_holders: 50,
           max_top10_percent: 50,
           max_slippage_bps: 200,
-          max_tax_percent: 5
+          max_tax_percent: 5,
+          lp_lock_min_days: 30
         },
         BSC: {
           min_liquidity_usd: 20000,
@@ -147,8 +164,32 @@ class SentimentArbitrageSystem {
           max_top10_percent: 60,
           max_slippage_bps: 300,
           max_tax_percent: 5,
+          lp_lock_min_days: 30,
           owner_safe_types: ['Renounced', 'MultiSig', 'TimeLock', 'Burned']
         }
+      },
+
+      // Exit gate thresholds
+      exit_gate_thresholds: {
+        SOL: {
+          min_liquidity_sol: 50,
+          max_top10_percent: 30,
+          max_wash_with_risk: 'MEDIUM'
+        },
+        BSC: {
+          min_liquidity_bnb: 100,
+          min_volume_24h_usd: 500000,
+          max_top10_percent: 40
+        }
+      },
+
+      // Exit gate slippage config
+      exit_gate_slippage: {
+        test_sell_percentage: 20,
+        sol_pass_threshold_pct: 2,
+        sol_reject_threshold_pct: 5,
+        bsc_pass_threshold_pct: 3,
+        bsc_reject_threshold_pct: 8
       },
 
       // Decision matrix configuration
@@ -179,13 +220,16 @@ class SentimentArbitrageSystem {
       // Cooldown periods
       cooldowns: {
         same_token_minutes: 60,
+        same_token_min: 60,  // Alias for position-sizer.js compatibility
         same_narrative_minutes: 30,
+        same_narrative_max_concurrent: 3,
         failed_trade_minutes: 15
       },
 
       // Position limits
       position_limits: {
         max_concurrent: 10,
+        max_concurrent_positions: 10,  // Alias for position-sizer.js compatibility
         max_daily_trades: 50,
         max_per_narrative: 3
       },
@@ -280,11 +324,30 @@ class SentimentArbitrageSystem {
         }
       }
 
+      // ==========================================
+      // STEP -1: CHECK SIGNAL SOURCE QUALITY
+      // ==========================================
+      const shouldUse = this.sourceOptimizer.shouldUseSource('telegram', channel_name);
+      if (!shouldUse) {
+        // Source is blacklisted or inactive - skip silently
+        this.markSignalProcessed(id);
+        return;
+      }
+
       console.log('\n' + '─'.repeat(80));
       console.log(`🔔 NEW SIGNAL: ${symbol} (${chain}) from ${channel_name}`);
       console.log('─'.repeat(80));
 
       this.stats.signals_received++;
+      
+      // Record signal for source tracking
+      const signalOutcomeId = this.sourceOptimizer.recordSignal(
+        'telegram', 
+        channel_name, 
+        channel_name, 
+        token_ca, 
+        chain
+      );
 
       // ==========================================
       // STEP 0: PERMANENT BLACKLIST CHECK
@@ -398,10 +461,46 @@ class SentimentArbitrageSystem {
       }
 
       // Prepare data structures for soft scorer
+      // Get channel tier from database
+      let channelTier = 'C'; // Default
+      try {
+        const channelInfo = this.db.prepare(`
+          SELECT tier FROM telegram_channels 
+          WHERE channel_name = ? OR channel_username LIKE ?
+        `).get(signal.channel_name, `%${signal.channel_name}%`);
+        if (channelInfo) {
+          channelTier = channelInfo.tier;
+        }
+      } catch (e) {
+        // Ignore, use default tier
+      }
+
+      // Calculate time lag (minutes since first mention)
+      const signalTime = new Date(signal.timestamp).getTime();
+      const timeLagMinutes = Math.floor((Date.now() - signalTime) / 60000);
+
       const socialData = {
-        // Telegram data
+        // Telegram data - structured for scoring
         total_mentions: 1,
         unique_channels: 1,
+        tg_ch_15m: 1,  // Number of channels in 15 min window
+        tg_clusters_15m: 1,  // Number of independent clusters
+        tg_velocity: 0.5,  // Default velocity
+        tg_accel: 0,
+        tg_time_lag: timeLagMinutes,  // Minutes since first mention
+        N_total: 1,
+        
+        // Channel info for AI Influencer System
+        channel_name: signal.channel_name,
+        
+        // Promoted channels with tier info (required for Influence scoring)
+        promoted_channels: [{
+          name: signal.channel_name,
+          tier: channelTier,
+          timestamp: signalTime
+        }],
+        
+        // Legacy field
         channels: [signal.channel_name],
         message_timestamp: signal.timestamp,
 
@@ -410,7 +509,12 @@ class SentimentArbitrageSystem {
         twitter_unique_authors: twitterData.unique_authors,
         twitter_kol_count: twitterData.kol_count,
         twitter_engagement: twitterData.engagement,
-        twitter_sentiment: twitterData.sentiment
+        twitter_sentiment: twitterData.sentiment,
+        top_tweets: twitterData.top_tweets || [],  // For KOL detection
+        
+        // X validation fields
+        x_unique_authors_15m: twitterData.unique_authors,
+        x_tier1_hit: twitterData.kol_count >= 1 ? 1 : 0
       };
 
       // Use tokenMetadata (from Step 1) for Narrative detection
@@ -428,6 +532,32 @@ class SentimentArbitrageSystem {
       this.stats.soft_score_computed++;
 
       // ==========================================
+      // STEP 3.5: EXIT GATE (can we exit if we enter?)
+      // ==========================================
+      console.log('\n🚪 [3.5/7] Running exit gate...');
+      
+      // Get preliminary position size for slippage testing
+      const preliminaryPositionSize = this.config.position_templates[chain]?.small?.sol || 
+                                       this.config.position_templates[chain]?.small?.bnb || 0.5;
+      
+      const exitGateResult = this.exitGateService.evaluate(snapshot, preliminaryPositionSize);
+      
+      if (exitGateResult.status === 'REJECT') {
+        const reasonText = (exitGateResult.reasons || []).join(', ') || 'Exit not feasible';
+        console.log(`   ❌ Exit gate REJECT: ${reasonText}`);
+        this.markSignalProcessed(id);
+        this.stats.reject_decisions++;
+        return;
+      }
+      
+      if (exitGateResult.status === 'GREYLIST') {
+        const reasonText = (exitGateResult.reasons || []).join(', ') || 'Exit uncertain';
+        console.log(`   ⚠️  Exit gate GREYLIST: ${reasonText}`);
+      } else {
+        console.log(`   ✅ Exit gate passed (PASS)`);
+      }
+
+      // ==========================================
       // STEP 4: DECISION MATRIX
       // ==========================================
       console.log('\n🎯 [4/7] Making decision...');
@@ -437,7 +567,7 @@ class SentimentArbitrageSystem {
         token_ca: token_ca,
         chain: chain,
         hard_gate: gateResult,
-        exit_gate: { status: 'PASS', reasons: [] }, // Exit gate not yet implemented
+        exit_gate: exitGateResult,
         soft_score: scoreResult
       };
 
@@ -477,8 +607,8 @@ class SentimentArbitrageSystem {
       // ==========================================
       console.log('\n💰 [5/7] Calculating position size...');
 
-      // Reuse tokenData from Step 3
-      const positionCheck = await this.positionSizer.canOpenPosition(decision, tokenData);
+      // Use tokenMetadata from Step 1
+      const positionCheck = await this.positionSizer.canOpenPosition(decision, tokenMetadata);
 
       if (!positionCheck.allowed) {
         console.log(`   ❌ Cannot trade: ${positionCheck.reason}`);
@@ -522,8 +652,9 @@ class SentimentArbitrageSystem {
         }
         this.stats.executions_success++;
 
-        // Record position
-        this.recordPosition(signal, snapshot, scoreResult, positionSize, executionResult);
+        // Record position - use positionCheck.adjusted_size
+        const finalPositionSize = positionCheck.adjusted_size || tradeParams.position_size;
+        this.recordPosition(signal, snapshot, scoreResult, finalPositionSize, executionResult);
 
       } else {
         console.log(`   ❌ Execution failed: ${executionResult.error}`);
@@ -563,6 +694,23 @@ class SentimentArbitrageSystem {
    */
   recordPosition(signal, snapshot, scoreResult, positionSize, executionResult) {
     try {
+      // Handle positionSize - could be an object or a number
+      let nativeSize, usdSize, confidence, kellyFraction;
+      
+      if (typeof positionSize === 'object' && positionSize !== null) {
+        // positionSize is an object with detailed info
+        nativeSize = positionSize.sol || positionSize.bnb || positionSize.amount || 0;
+        usdSize = positionSize.usd_approx || positionSize.usd_value || 0;
+        confidence = positionSize.confidence || null;
+        kellyFraction = positionSize.kelly_fraction || null;
+      } else {
+        // positionSize is a number
+        nativeSize = positionSize || 0;
+        usdSize = 0;
+        confidence = null;
+        kellyFraction = null;
+      }
+
       this.db.prepare(`
         INSERT INTO positions (
           chain, token_ca, symbol, signal_id,
@@ -577,17 +725,17 @@ class SentimentArbitrageSystem {
         signal.token_ca,
         snapshot.symbol || signal.token_ca.substring(0, 8),
         signal.id,
-        snapshot.current_price,
-        positionSize.position_size_native,
-        positionSize.position_size_usd,
-        scoreResult.final_score,
-        positionSize.confidence,
-        positionSize.kelly_fraction,
-        snapshot.liquidity_usd,
-        snapshot.top10_holders,
-        snapshot.slippage_bps_1sol,
-        scoreResult.breakdown.tg_accel || 0,
-        JSON.stringify(snapshot.risk_wallets || []),
+        snapshot.current_price || null,
+        nativeSize,
+        usdSize,
+        scoreResult.score || scoreResult.final_score || 0,
+        confidence,
+        kellyFraction,
+        snapshot.liquidity_usd || null,
+        snapshot.top10_percent || null,
+        snapshot.slippage_sell_20pct || null,
+        scoreResult.breakdown?.tg_spread?.score || 0,
+        JSON.stringify(snapshot.key_risk_wallets || []),
         executionResult.trade_id,
         executionResult.tx_hash || null
       );
@@ -626,7 +774,7 @@ class SentimentArbitrageSystem {
       clearInterval(this.signalInterval);
     }
 
-    this.telegramService.stop();
+    await this.telegramService.stop();
     this.positionMonitor.stop();
 
     console.log('✅ System stopped\n');

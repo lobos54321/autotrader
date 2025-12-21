@@ -64,7 +64,8 @@ export class BSCSnapshotService {
         lpLockData,
         liquidityData,
         top10Data,
-        sellConstraints
+        sellConstraints,
+        priceData
       ] = await Promise.allSettled([
         this.checkHoneypot(tokenCA),
         this.analyzeTax(tokenCA),
@@ -73,13 +74,20 @@ export class BSCSnapshotService {
         this.verifyLPLock(tokenCA),
         this.getLiquidity(tokenCA),
         this.getTop10Analysis(tokenCA),
-        this.checkSellConstraints(tokenCA)
+        this.checkSellConstraints(tokenCA),
+        this.getTokenPriceAndSymbol(tokenCA)
       ]);
+
+      const priceInfo = this.unwrap(priceData) || {};
 
       return {
         // Basic info
         chain: 'BSC',
         token_ca: tokenCA,
+        
+        // Price and symbol (for position monitor and recording)
+        current_price: priceInfo.price || null,
+        symbol: priceInfo.symbol || null,
 
         // Honeypot
         honeypot: this.unwrap(honeypotData)?.status || 'Unknown',
@@ -613,6 +621,29 @@ export class BSCSnapshotService {
   }
 
   /**
+   * Get token price and symbol from DexScreener
+   */
+  async getTokenPriceAndSymbol(tokenCA) {
+    try {
+      const url = `https://api.dexscreener.com/latest/dex/tokens/${tokenCA}`;
+      const response = await axios.get(url, { timeout: 10000 });
+
+      if (!response.data.pairs || response.data.pairs.length === 0) {
+        return { price: null, symbol: null };
+      }
+
+      const pair = response.data.pairs[0];
+      return {
+        price: parseFloat(pair.priceUsd) || null,
+        symbol: pair.baseToken?.symbol || null
+      };
+    } catch (error) {
+      console.error('Error getting token price and symbol:', error.message);
+      return { price: null, symbol: null };
+    }
+  }
+
+  /**
    * Analyze Top10 holders
    */
   async getTop10Analysis(tokenCA) {
@@ -695,6 +726,9 @@ export class BSCSnapshotService {
    */
   getUnknownSnapshot() {
     return {
+      chain: 'BSC',
+      current_price: null,
+      symbol: null,
       honeypot: 'Unknown',
       tax_buy: null,
       tax_sell: null,
@@ -703,6 +737,7 @@ export class BSCSnapshotService {
       dangerous_functions: [],
       lp_lock: null,
       liquidity: null,
+      liquidity_usd: null,
       liquidity_unit: 'BNB',
       vol_24h_usd: null,
       top10_percent: null,

@@ -5,3 +5,4 @@ data/*.db-journal
 npm-debug.log
 .DS_Store
 *.log
+.env.backup

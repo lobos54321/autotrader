@@ -9,10 +9,8 @@
  * Monitoring frequency: Every 1-3 minutes per position
  */
 
-import Database from 'better-sqlite3';
 import { SolanaSnapshotService } from '../inputs/chain-snapshot-sol.js';
 import { BSCSnapshotService } from '../inputs/chain-snapshot-bsc.js';
-import { TelegramService } from '../inputs/telegram-signals.js';
 import { GMGNTelegramExecutor } from './gmgn-telegram-executor.js';
 
 export class PositionMonitor {
@@ -23,7 +21,6 @@ export class PositionMonitor {
     // Services
     this.solService = new SolanaSnapshotService(config);
     this.bscService = new BSCSnapshotService(config);
-    this.telegramService = new TelegramService(config, db);
     this.executor = new GMGNTelegramExecutor(config, db);
 
     // Monitor settings
@@ -529,3 +526,5 @@ export class PositionMonitor {
     };
   }
 }
+
+export default PositionMonitor;

@@ -293,3 +293,5 @@ export class TelegramUserListener {
     };
   }
 }
+
+export default TelegramUserListener;

@@ -28,6 +28,10 @@ export class SolanaSnapshotService {
     this.connection = new Connection(rpcUrl);
     this.alchemyApiKey = alchemyKey;
 
+    // Helius API configuration
+    this.heliusApiKey = process.env.HELIUS_API_KEY || '';
+    this.heliusApiUrl = 'https://api.helius.xyz/v0';
+
     // ⚙️ Initialize Rate Limiter
     // Alchemy free tier: ~25 RPS (requests per second)
     // We set conservatively: 10 RPS with burst capacity of 5
@@ -61,7 +65,8 @@ export class SolanaSnapshotService {
         top10Data,
         slippageData,
         washData,
-        riskWallets
+        riskWallets,
+        priceData
       ] = await Promise.allSettled([
         this.getMintAuthorities(tokenCA),
         this.getLPStatus(tokenCA),
@@ -71,13 +76,20 @@ export class SolanaSnapshotService {
         Promise.resolve({ top10_percent: null, holder_count: null }),  // this.getTop10Analysis(tokenCA),
         plannedPosition ? this.testSlippage(tokenCA, plannedPosition) : Promise.resolve(null),
         this.detectWashTrading(tokenCA),
-        this.identifyRiskWallets(tokenCA)
+        this.identifyRiskWallets(tokenCA),
+        this.getTokenPriceAndSymbol(tokenCA)
       ]);
+
+      const priceInfo = this.unwrap(priceData) || {};
 
       return {
         // Basic info
         chain: 'SOL',
         token_ca: tokenCA,
+        
+        // Price and symbol (for position monitor and recording)
+        current_price: priceInfo.price || null,
+        symbol: priceInfo.symbol || null,
 
         // Mint authorities
         freeze_authority: this.unwrap(mintInfo)?.freeze_authority || 'Unknown',
@@ -440,6 +452,29 @@ export class SolanaSnapshotService {
   }
 
   /**
+   * Get token price and symbol from DexScreener (combined call)
+   */
+  async getTokenPriceAndSymbol(tokenCA) {
+    try {
+      const url = `https://api.dexscreener.com/latest/dex/tokens/${tokenCA}`;
+      const response = await axios.get(url, { timeout: 10000 });
+
+      if (!response.data.pairs || response.data.pairs.length === 0) {
+        return { price: null, symbol: null };
+      }
+
+      const pair = response.data.pairs[0];
+      return {
+        price: parseFloat(pair.priceUsd) || null,
+        symbol: pair.baseToken?.symbol || null
+      };
+    } catch (error) {
+      console.error('Error getting token price and symbol:', error.message);
+      return { price: null, symbol: null };
+    }
+  }
+
+  /**
    * Detect wash trading (heuristic-based)
    */
   async detectWashTrading(tokenCA) {
@@ -725,10 +760,14 @@ export class SolanaSnapshotService {
 
   getUnknownSnapshot() {
     return {
+      chain: 'SOL',
+      current_price: null,
+      symbol: null,
       freeze_authority: 'Unknown',
       mint_authority: 'Unknown',
       lp_status: 'Unknown',
       liquidity: null,
+      liquidity_usd: null,
       liquidity_unit: 'SOL',
       top10_percent: null,
       slippage_sell_20pct: null,

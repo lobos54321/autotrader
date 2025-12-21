@@ -12,7 +12,10 @@
     "db:init": "node scripts/init-db.js",
     "db:migrate": "node scripts/migrate-db.js",
     "backtest": "node scripts/backtest.js",
-    "optimize": "node scripts/weekly-optimize.js"
+    "optimize": "node scripts/weekly-optimize.js",
+    "narratives:update": "node scripts/update-narratives.js",
+    "influencers:discover": "node scripts/discover-influencers.js",
+    "weekly:maintenance": "node scripts/weekly-maintenance.js"
   },
   "dependencies": {
     "node-telegram-bot-api": "^0.64.0",

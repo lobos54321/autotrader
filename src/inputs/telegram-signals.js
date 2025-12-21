@@ -293,3 +293,5 @@ export class TelegramService {
     }
   }
 }
+
+export default TelegramService;

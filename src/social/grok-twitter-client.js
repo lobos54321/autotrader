@@ -266,6 +266,84 @@ Return ONLY the JSON, no other text.
       };
     }
   }
+
+  /**
+   * Generic Grok chat - for narrative analysis and other queries
+   *
+   * @param {string} prompt - The prompt to send to Grok
+   * @returns {Promise<string>} Grok's response text
+   */
+  async askGrok(prompt) {
+    if (!this.apiKey) {
+      throw new Error('XAI_API_KEY not configured');
+    }
+
+    const requestBody = JSON.stringify({
+      model: this.model,
+      messages: [
+        {
+          role: 'system',
+          content: 'You are a crypto market analyst assistant. Provide concise, data-driven analysis. Always respond in valid JSON when requested.'
+        },
+        {
+          role: 'user',
+          content: prompt
+        }
+      ],
+      temperature: 0.3,
+      max_tokens: 2000
+    });
+
+    const options = {
+      hostname: 'api.x.ai',
+      port: 443,
+      path: '/v1/chat/completions',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${this.apiKey}`,
+        'Content-Length': Buffer.byteLength(requestBody)
+      }
+    };
+
+    return new Promise((resolve, reject) => {
+      const req = https.request(options, (res) => {
+        let data = '';
+
+        res.on('data', (chunk) => {
+          data += chunk;
+        });
+
+        res.on('end', () => {
+          try {
+            if (res.statusCode !== 200) {
+              reject(new Error(`Grok API error: ${res.statusCode} - ${data}`));
+              return;
+            }
+
+            const parsed = JSON.parse(data);
+            const content = parsed.choices?.[0]?.message?.content;
+
+            if (!content) {
+              reject(new Error('No content in Grok response'));
+              return;
+            }
+
+            resolve(content);
+          } catch (error) {
+            reject(new Error(`Failed to parse Grok response: ${error.message}`));
+          }
+        });
+      });
+
+      req.on('error', (error) => {
+        reject(new Error(`Grok request failed: ${error.message}`));
+      });
+
+      req.write(requestBody);
+      req.end();
+    });
+  }
 }
 
 export default GrokTwitterClient;

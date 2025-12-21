@@ -1,9 +1,13 @@
 channel_name,tme_link,tier,status,historical_30_120_ev,reject_ratio_24h,notes
-MomentumTrackerCN,t.me/momentumtrackercn,A,ACTIVE,2.5,0.15,Primary aggregator
-AlphaCallsCN,t.me/alphacallscn,A,ACTIVE,2.2,0.18,High quality signals
-GemFinderPro,t.me/gemfinderpro,B,ACTIVE,1.8,0.22,Mixed quality
-MemeRushCN,t.me/memerushcn,B,ACTIVE,1.6,0.25,Volume oriented
-QuickPumpAlerts,t.me/quickpumpalerts,C,WATCH,1.2,0.35,High risk signals
-CryptoSignalsVIP,t.me/cryptosignalsvip,C,WATCH,0.8,0.45,Frequently fails
-ScamAlertBot,t.me/scamalertbot,BLACKLIST,BLOCKED,−0.5,0.85,Known scam promoter
-PumpAndDumpKing,t.me/pumpanddumpking,BLACKLIST,BLOCKED,−1.2,0.92,Verified matrix operator
+CXOStrategyBot,t.me/CXOStrategyBot,A,ACTIVE,2.5,0.15,Strategy signals
+MomentumTrackerCN,t.me/MomentumTrackerCN,A,ACTIVE,2.5,0.15,Primary aggregator
+SOLSmartAlert,t.me/SOLSmartAlert,A,ACTIVE,2.3,0.18,SOL smart money alerts
+SOLCabalAlertCN,t.me/SOLCabalAlertCN,A,ACTIVE,2.2,0.18,SOL cabal alerts CN
+BSCAlphaWallet,t.me/BSCAlphaWallet,B,ACTIVE,1.8,0.22,BSC alpha wallet tracking
+BSCEarly_AlertCN,t.me/BSCEarly_AlertCN,B,ACTIVE,1.8,0.22,BSC early alerts CN
+Picgemscalls,t.me/Picgemscalls,B,ACTIVE,1.6,0.25,Gem calls
+DexscreenerBoostAlerts,t.me/DexscreenerBoostAlerts,B,ACTIVE,1.7,0.23,Dexscreener boost alerts
+gem1000xpump,t.me/gem1000xpump,B,ACTIVE,1.5,0.28,1000x gem pump calls
+wedegentheyaped,t.me/wedegentheyaped,B,ACTIVE,1.6,0.25,Degen ape calls
+Xiao_Trading,t.me/Xiao_Trading,A,ACTIVE,2.0,0.20,Xiao trading signals
+nhn0x69420,t.me/nhn0x69420,B,ACTIVE,1.5,0.28,NHN signals
