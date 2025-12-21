@@ -158,13 +158,45 @@ async function main() {
     // ========================================
     console.log('\n🧹 [5/5] Cleaning up old data...');
     
-    // Delete signals older than 7 days
-    const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    const now = Math.floor(Date.now() / 1000);
+    
+    // 1. Delete telegram_signals older than 7 days
+    const sevenDaysAgo = now - 7 * 24 * 60 * 60;
     const deletedSignals = db.prepare(`
       DELETE FROM telegram_signals WHERE created_at < ?
-    `).run(Math.floor(sevenDaysAgo / 1000));
+    `).run(sevenDaysAgo);
+    console.log(`   ✅ Deleted ${deletedSignals.changes} old signals (>7 days)`);
     
-    console.log(`   ✅ Deleted ${deletedSignals.changes} old signals`);
+    // 2. Delete shadow_price_tracking older than 30 days
+    const thirtyDaysAgo = now - 30 * 24 * 60 * 60;
+    try {
+      const deletedTracking = db.prepare(`
+        DELETE FROM shadow_price_tracking WHERE created_at < ?
+      `).run(thirtyDaysAgo);
+      console.log(`   ✅ Deleted ${deletedTracking.changes} old tracking records (>30 days)`);
+    } catch (e) {
+      // Table might not exist
+    }
+    
+    // 3. Delete signal_outcomes older than 30 days (keep aggregated stats)
+    try {
+      const deletedOutcomes = db.prepare(`
+        DELETE FROM signal_outcomes WHERE entry_time < ?
+      `).run(thirtyDaysAgo);
+      console.log(`   ✅ Deleted ${deletedOutcomes.changes} old signal outcomes (>30 days)`);
+    } catch (e) {
+      // Table might not exist
+    }
+    
+    // 4. Vacuum database to reclaim space
+    db.exec('VACUUM');
+    console.log(`   ✅ Database vacuumed (space reclaimed)`);
+    
+    // 5. Show database size
+    const dbPath2 = process.env.DB_PATH || join(projectRoot, 'data', 'sentiment_arb.db');
+    const stats2 = fs.statSync(dbPath2);
+    const sizeMB = (stats2.size / 1024 / 1024).toFixed(2);
+    console.log(`   📊 Database size: ${sizeMB} MB`);
 
     // ========================================
     // SUMMARY
