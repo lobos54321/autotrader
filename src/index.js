@@ -31,6 +31,7 @@ import { PermanentBlacklistService } from './database/permanent-blacklist.js';
 import { SignalSourceOptimizer } from './scoring/signal-source-optimizer.js';
 import { ShadowPriceTracker } from './tracking/shadow-price-tracker.js';
 import { startDashboardServer } from './web/dashboard-server.js';
+import { RiskManager } from './risk/risk-manager.js';
 
 dotenv.config();
 
@@ -52,6 +53,9 @@ class SentimentArbitrageSystem {
     this.positionMonitor = new PositionMonitorV2(this.config, this.db);
     this.grokClient = new GrokTwitterClient();
     this.blacklistService = new PermanentBlacklistService(this.db);
+    
+    // Risk Manager - 风险管理系统
+    this.riskManager = new RiskManager(this.config, this.db);
     
     // Signal Source Optimizer - auto-optimize for higher win rate
     this.sourceOptimizer = new SignalSourceOptimizer(this.config, this.db);
@@ -356,6 +360,16 @@ class SentimentArbitrageSystem {
 
       this.stats.signals_received++;
       
+      // ==========================================
+      // STEP 0.5: RISK MANAGER - CAN WE TRADE?
+      // ==========================================
+      const canTradeCheck = this.riskManager.canTrade();
+      if (!canTradeCheck.allowed) {
+        console.log(`\n🛡️ [Risk] 无法交易: ${canTradeCheck.reason}`);
+        this.markSignalProcessed(id);
+        return;
+      }
+
       // Record signal for source tracking
       const signalOutcomeId = this.sourceOptimizer.recordSignal(
         'telegram', 
@@ -549,6 +563,27 @@ class SentimentArbitrageSystem {
       console.log(`      - Source: ${scoreResult.breakdown.source.score.toFixed(1)}`);
 
       this.stats.soft_score_computed++;
+
+      // ==========================================
+      // STEP 3.1: RISK MANAGER - SIGNAL EVALUATION
+      // ==========================================
+      console.log('\n🛡️ [3.1/7] Risk evaluation...');
+      const riskEval = this.riskManager.evaluateSignal(signal, scoreResult.score, snapshot);
+      
+      if (!riskEval.allowed) {
+        console.log(`   ❌ Risk rejected: ${riskEval.reason}`);
+        this.markSignalProcessed(id);
+        this.stats.reject_decisions++;
+        return;
+      }
+      
+      // Update score with time decay if applied
+      if (riskEval.adjustedScore !== scoreResult.score) {
+        console.log(`   ⚠️ 分数调整: ${scoreResult.score} → ${riskEval.adjustedScore.toFixed(0)} (${riskEval.reason})`);
+        scoreResult.score = riskEval.adjustedScore;
+      } else {
+        console.log(`   ✅ Risk check passed: ${riskEval.reason}`);
+      }
       
       // ==========================================
       // SHADOW MODE: Track price for source evaluation

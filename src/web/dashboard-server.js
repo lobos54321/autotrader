@@ -295,6 +295,38 @@ function renderDashboard(data) {
       </div>
     </div>
     
+    <!-- 风险管理规则 -->
+    <div class="card" style="margin-top: 20px;">
+      <h2>🛡️ 风险管理规则</h2>
+      <div class="grid" style="grid-template-columns: repeat(4, 1fr);">
+        <div class="exit-strategy">
+          <h3>📊 入场标准</h3>
+          <div class="exit-rule"><span>最低分数</span><span>≥70分</span></div>
+          <div class="exit-rule"><span>5分钟内</span><span>满分</span></div>
+          <div class="exit-rule"><span>5-15分钟</span><span>打8折</span></div>
+          <div class="exit-rule"><span>30分钟后</span><span>不参与</span></div>
+        </div>
+        <div class="exit-strategy">
+          <h3>💵 资金管理</h3>
+          <div class="exit-rule"><span>单笔上限</span><span>总资金2%</span></div>
+          <div class="exit-rule"><span>最大持仓</span><span>3个</span></div>
+        </div>
+        <div class="exit-strategy">
+          <h3>🚨 负反馈机制</h3>
+          <div class="exit-rule"><span>连亏暂停</span><span>3笔</span></div>
+          <div class="exit-rule"><span>暂停时间</span><span>24小时</span></div>
+          <div class="exit-rule"><span>胜率阈值</span><span>≥35%</span></div>
+        </div>
+        <div class="exit-strategy">
+          <h3>⚠️ 危险信号</h3>
+          <div class="exit-rule"><span>蜜罐检测</span><span>+20分</span></div>
+          <div class="exit-rule"><span>LP未锁定</span><span>+10分</span></div>
+          <div class="exit-rule"><span>Top10>50%</span><span>+15分</span></div>
+          <div class="exit-rule"><span>危险上限</span><span>15分</span></div>
+        </div>
+      </div>
+    </div>
+    
     <div class="refresh-info">
       页面每60秒自动刷新 | 最后更新: ${new Date().toLocaleString('zh-CN')}
     </div>
