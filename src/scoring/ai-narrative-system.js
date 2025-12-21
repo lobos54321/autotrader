@@ -1,15 +1,18 @@
 /**
- * AI-Powered Narrative System
+ * AI-Powered Narrative System v2
  * 
- * Uses Grok AI to:
- * 1. Maintain a dynamic narrative database (weekly update)
- * 2. Assess individual tokens' narrative fit in real-time
- * 3. Score narratives based on market heat, lifecycle, sustainability
+ * 核心理念：不用旧世界的框架判断新事物
  * 
- * Architecture:
- * - NarrativeDatabase: SQLite table storing narrative metrics
- * - WeeklyUpdater: Cron job that asks Grok to reassess all narratives
- * - TokenAssessor: Real-time Grok call to identify token's narrative
+ * 架构：
+ * 1. 实时 Twitter 搜索验证叙事（不是猜测，是验证）
+ * 2. 自动发现新叙事（AI 学习市场）
+ * 3. 动态更新叙事热度（每小时）
+ * 
+ * AI 作用：
+ * - 搜索 Twitter 了解当前讨论主题
+ * - 分析讨论内容判断叙事类型
+ * - 发现新兴叙事并自动添加
+ * - 实时评估叙事生命周期
  */
 
 import GrokTwitterClient from '../social/grok-twitter-client.js';
@@ -26,6 +29,10 @@ export class AINarrativeSystem {
     // Load narratives into memory for fast lookup
     this.narrativesCache = new Map();
     this.loadNarrativesCache();
+    
+    // 新叙事发现缓存（防止重复查询）
+    this.recentDiscoveries = new Map(); // token -> discovery result
+    this.discoveryExpiry = 30 * 60 * 1000; // 30 分钟过期
   }
 
   /**
@@ -232,6 +239,71 @@ export class AINarrativeSystem {
   }
 
   /**
+   * 每小时热度更新 - 基于实时 Twitter 数据
+   * 
+   * 这个比 weekly update 更轻量，只更新热度
+   */
+  async hourlyHeatUpdate() {
+    console.log('🔄 [AI Narrative] Hourly heat update...');
+    
+    const prompt = `你是加密货币市场分析师。基于你对 Twitter/X 当前讨论的了解，评估以下叙事的实时热度。
+
+当前叙事列表：
+${Array.from(this.narrativesCache.keys()).join('\n')}
+
+任务：
+1. 评估每个叙事的当前热度 (0-10)
+2. 识别任何新兴热点叙事
+3. 标记正在衰退的叙事
+
+用 JSON 回复：
+{
+  "heat_updates": [
+    {"name": "AI_Agents", "heat": 9.5, "trend": "rising"},
+    {"name": "Gaming_Metaverse", "heat": 2.0, "trend": "declining"}
+  ],
+  "emerging_narratives": [
+    {"name": "新叙事名称", "heat": 8.0, "keywords": ["关键词1", "关键词2"], "reasoning": "原因"}
+  ]
+}`;
+
+    try {
+      const response = await this.grokClient.askGrok(prompt);
+      const jsonMatch = response.match(/\{[\s\S]*\}/);
+      
+      if (jsonMatch) {
+        const data = JSON.parse(jsonMatch[0]);
+        
+        // 更新热度
+        for (const update of data.heat_updates || []) {
+          if (this.narrativesCache.has(update.name)) {
+            this.db.prepare(`
+              UPDATE ai_narratives 
+              SET market_heat = ?, last_updated = ?
+              WHERE narrative_name = ?
+            `).run(update.heat, Date.now(), update.name);
+          }
+        }
+        
+        // 添加新兴叙事
+        for (const emerging of data.emerging_narratives || []) {
+          await this.discoverNewNarrative(emerging.name, {
+            keywords: emerging.keywords || [],
+            market_heat: emerging.heat || 7,
+            reasoning: emerging.reasoning,
+            source_token: 'hourly_scan'
+          });
+        }
+        
+        this.loadNarrativesCache();
+        console.log(`✅ [AI Narrative] Hourly update complete`);
+      }
+    } catch (error) {
+      console.error('❌ [AI Narrative] Hourly update failed:', error.message);
+    }
+  }
+
+  /**
    * Weekly AI Update - Ask Grok to reassess all narratives
    * 
    * This should be called by a cron job weekly
@@ -380,39 +452,90 @@ Respond in JSON format:
   }
 
   /**
-   * Real-time: Ask Grok to identify a token's narrative
+   * 智能叙事识别 v2
+   * 
+   * 流程：
+   * 1. 先搜索 Twitter 获取真实讨论内容
+   * 2. AI 分析讨论主题，判断叙事类型
+   * 3. 如果是新叙事，自动学习并添加
    * 
    * @param {string} tokenSymbol - Token symbol
    * @param {string} tokenName - Token name
    * @param {Object} twitterData - Twitter data from Grok search
-   * @returns {Object} { narrative, confidence, reasoning }
+   * @returns {Object} { narrative, confidence, reasoning, is_new_narrative }
    */
   async identifyTokenNarrative(tokenSymbol, tokenName, twitterData = null) {
-    // First, try keyword matching (fast path)
-    const keywordMatch = this.matchNarrativeByKeywords(tokenSymbol, tokenName);
-    if (keywordMatch && keywordMatch.confidence >= 0.7) {
-      return keywordMatch;
+    // 检查缓存，避免重复查询
+    const cacheKey = `${tokenSymbol}_${tokenName}`.toLowerCase();
+    const cached = this.recentDiscoveries.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < this.discoveryExpiry) {
+      return cached.result;
     }
 
-    // If no strong keyword match, ask Grok (slow path)
-    const twitterContext = twitterData ? 
-      `Twitter mentions: ${twitterData.mention_count}, sentiment: ${twitterData.sentiment}` : 
-      'No Twitter data available';
+    // 第一步：快速关键词匹配（对已知叙事有效）
+    const keywordMatch = this.matchNarrativeByKeywords(tokenSymbol, tokenName);
+    
+    // 第二步：通过 Twitter 搜索验证
+    let twitterContext = '';
+    let twitterTopics = [];
+    
+    if (twitterData) {
+      // 已有 Twitter 数据
+      twitterContext = `
+Twitter 数据：
+- 提及数：${twitterData.mention_count || 0}
+- 互动数：${twitterData.engagement || 0}
+- 推文样本：${twitterData.sample_tweets?.slice(0, 3).join(' | ') || '无'}
+`;
+      twitterTopics = twitterData.topics || [];
+    } else {
+      // 需要搜索 Twitter
+      try {
+        const searchResult = await this.grokClient.searchTwitter(`$${tokenSymbol}`, 24);
+        if (searchResult && searchResult.mention_count > 0) {
+          twitterContext = `
+Twitter 数据：
+- 提及数：${searchResult.mention_count}
+- 互动数：${searchResult.engagement}
+- 推文样本：${searchResult.sample_tweets?.slice(0, 3).join(' | ') || '无'}
+`;
+          twitterTopics = searchResult.topics || [];
+        }
+      } catch (error) {
+        console.log(`   ⚠️ Twitter search failed: ${error.message}`);
+      }
+    }
 
-    const prompt = `Identify the narrative category for this crypto token:
-Symbol: ${tokenSymbol}
-Name: ${tokenName || 'Unknown'}
+    // 第三步：AI 分析（不是猜测，是基于真实数据分析）
+    const existingNarratives = Array.from(this.narrativesCache.keys()).join(', ');
+    
+    const prompt = `你是一个加密货币市场分析师。基于以下真实数据，分析这个 token 的叙事类型。
+
+Token 信息：
+- Symbol: $${tokenSymbol}
+- Name: ${tokenName || '未知'}
 ${twitterContext}
 
-Available narratives: ${Array.from(this.narrativesCache.keys()).join(', ')}
+现有叙事类型：${existingNarratives}
 
-If it doesn't fit any existing narrative, respond with "Unknown".
+关键任务：
+1. 分析 Twitter 讨论的主题和情绪
+2. 判断属于哪个现有叙事，还是一个新叙事
+3. 如果是新叙事，描述它的特征
 
-Respond in JSON:
+注意：
+- 如果 Twitter 数据显示这是一个新兴热点，不要硬套到现有叙事
+- 加密市场变化很快，新叙事随时可能出现
+- 例如：如果发现大量讨论"量子计算"或"RWA 2.0"等新概念，这可能是新叙事
+
+用 JSON 回复：
 {
-  "narrative": "Meme_Coins",
+  "narrative": "现有叙事名称 或 NEW:新叙事名称",
   "confidence": 0.85,
-  "reasoning": "Token name suggests meme culture theme"
+  "is_new_narrative": false,
+  "new_narrative_keywords": [],
+  "market_heat": 8,
+  "reasoning": "基于 Twitter 讨论分析..."
 }`;
 
     try {
@@ -421,24 +544,99 @@ Respond in JSON:
       
       if (jsonMatch) {
         const result = JSON.parse(jsonMatch[0]);
-        return {
+        
+        // 如果发现新叙事，自动添加到系统
+        if (result.is_new_narrative && result.narrative.startsWith('NEW:')) {
+          const newNarrativeName = result.narrative.replace('NEW:', '').trim();
+          await this.discoverNewNarrative(newNarrativeName, {
+            keywords: result.new_narrative_keywords || [],
+            market_heat: result.market_heat || 7,
+            reasoning: result.reasoning,
+            source_token: tokenSymbol
+          });
+          result.narrative = newNarrativeName;
+        }
+        
+        const identification = {
           narrative: result.narrative,
-          confidence: result.confidence || 0.5,
-          reasoning: result.reasoning || 'AI identified',
-          source: 'grok_ai'
+          confidence: result.confidence || 0.7,
+          reasoning: result.reasoning || 'AI 基于 Twitter 数据分析',
+          is_new_narrative: result.is_new_narrative || false,
+          market_heat: result.market_heat,
+          source: 'grok_twitter_verified'
         };
+        
+        // 缓存结果
+        this.recentDiscoveries.set(cacheKey, {
+          result: identification,
+          timestamp: Date.now()
+        });
+        
+        return identification;
       }
     } catch (error) {
-      console.log(`   ⚠️ Grok narrative identification failed: ${error.message}`);
+      console.log(`   ⚠️ Grok narrative analysis failed: ${error.message}`);
     }
 
-    // Fallback to keyword match or unknown
-    return keywordMatch || {
+    // 回退到关键词匹配
+    const fallbackResult = keywordMatch || {
       narrative: 'Unknown',
-      confidence: 0,
-      reasoning: 'Could not identify narrative',
+      confidence: 0.3,
+      reasoning: '无法确定叙事类型',
       source: 'fallback'
     };
+    
+    this.recentDiscoveries.set(cacheKey, {
+      result: fallbackResult,
+      timestamp: Date.now()
+    });
+    
+    return fallbackResult;
+  }
+
+  /**
+   * 自动发现并添加新叙事
+   */
+  async discoverNewNarrative(narrativeName, data) {
+    console.log(`🆕 [AI Narrative] Discovering new narrative: ${narrativeName}`);
+    
+    // 检查是否已存在
+    if (this.narrativesCache.has(narrativeName)) {
+      console.log(`   Already exists, skipping...`);
+      return;
+    }
+    
+    // 添加新叙事到数据库
+    const lifecycleMultiplier = 1.3; // 新叙事默认 early_explosion
+    const weight = Math.min(10, (data.market_heat || 7) * lifecycleMultiplier);
+    
+    try {
+      this.db.prepare(`
+        INSERT INTO ai_narratives (
+          narrative_name, market_heat, sustainability, competition_level,
+          lifecycle_stage, lifecycle_multiplier, keywords, ai_reasoning,
+          weight, last_updated, update_source
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'auto_discovered')
+      `).run(
+        narrativeName,
+        data.market_heat || 7,
+        5, // 新叙事可持续性未知
+        'low', // 新叙事竞争低
+        'early_explosion',
+        lifecycleMultiplier,
+        JSON.stringify(data.keywords || []),
+        `Auto-discovered from $${data.source_token}. ${data.reasoning || ''}`,
+        weight,
+        Date.now()
+      );
+      
+      // 重新加载缓存
+      this.loadNarrativesCache();
+      
+      console.log(`   ✅ New narrative added: ${narrativeName} (weight: ${weight.toFixed(1)})`);
+    } catch (error) {
+      console.log(`   ❌ Failed to add narrative: ${error.message}`);
+    }
   }
 
   /**
