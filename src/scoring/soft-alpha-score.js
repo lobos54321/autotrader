@@ -129,6 +129,7 @@ export class SoftAlphaScorer {
     // ==========================================
     let dynamicAdjustments = null;
     let dynamicReasons = [];
+    let smartMoneyVeto = false; // 聪明钱一票否决标志
     
     if (this.useDynamicScoring && this.dynamicScoring) {
       try {
@@ -138,6 +139,34 @@ export class SoftAlphaScorer {
           channelName,
           narrative.narrative || narrative.narrative_name
         );
+        
+        // ==========================================
+        // 🚨 聪明钱一票否决逻辑 (MVP 3.0 核心)
+        // ==========================================
+        // 如果检测到聪明钱大量出逃，直接返回 Score = 0
+        if (dynamicAdjustments.smartMoney && dynamicAdjustments.smartMoney.netFlow < -10000) {
+          console.log(`   🚨 [VETO] 聪明钱出逃! 净流出 $${Math.abs(dynamicAdjustments.smartMoney.netFlow).toFixed(0)} → Score = 0`);
+          smartMoneyVeto = true;
+          return {
+            score: 0,
+            breakdown: {
+              narrative,
+              influence,
+              tg_spread: tgSpread,
+              graph,
+              source
+            },
+            adjustments: {
+              matrix_penalty: matrixPenalty,
+              x_multiplier: xMultiplier,
+              dynamic: dynamicAdjustments,
+              smart_money_veto: true
+            },
+            reasons: ['🚨 聪明钱一票否决: 检测到大额出逃，拒绝入场'],
+            vetoed: true,
+            veto_reason: 'smart_money_exit'
+          };
+        }
         
         // 应用动态调整
         const dynamicResult = this.dynamicScoring.applyDynamicAdjustments(baseScore, dynamicAdjustments);
