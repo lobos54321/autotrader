@@ -606,9 +606,19 @@ ${twitterContext}
       return;
     }
     
-    // 添加新叙事到数据库
-    const lifecycleMultiplier = 1.3; // 新叙事默认 early_explosion
-    const weight = Math.min(10, (data.market_heat || 7) * lifecycleMultiplier);
+    // Step 1: 评估潜在影响力
+    console.log(`   📊 Evaluating potential impact...`);
+    const impactAnalysis = await this.evaluateNarrativeImpact(narrativeName, data);
+    
+    // Step 2: 如果影响力太低，不添加
+    if (impactAnalysis.impact_score < 3) {
+      console.log(`   ⚠️ Low impact score (${impactAnalysis.impact_score}/10), skipping...`);
+      return;
+    }
+    
+    // Step 3: 添加新叙事到数据库
+    const lifecycleMultiplier = impactAnalysis.lifecycle_multiplier || 1.3;
+    const weight = Math.min(10, impactAnalysis.impact_score * lifecycleMultiplier);
     
     try {
       this.db.prepare(`
@@ -619,13 +629,13 @@ ${twitterContext}
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'auto_discovered')
       `).run(
         narrativeName,
-        data.market_heat || 7,
-        5, // 新叙事可持续性未知
-        'low', // 新叙事竞争低
-        'early_explosion',
+        impactAnalysis.market_heat || 7,
+        impactAnalysis.sustainability || 5,
+        impactAnalysis.competition_level || 'low',
+        impactAnalysis.lifecycle_stage || 'early_explosion',
         lifecycleMultiplier,
         JSON.stringify(data.keywords || []),
-        `Auto-discovered from $${data.source_token}. ${data.reasoning || ''}`,
+        impactAnalysis.reasoning || `Auto-discovered from $${data.source_token}`,
         weight,
         Date.now()
       );
@@ -633,9 +643,203 @@ ${twitterContext}
       // 重新加载缓存
       this.loadNarrativesCache();
       
-      console.log(`   ✅ New narrative added: ${narrativeName} (weight: ${weight.toFixed(1)})`);
+      console.log(`   ✅ New narrative added: ${narrativeName}`);
+      console.log(`      Impact: ${impactAnalysis.impact_score}/10`);
+      console.log(`      Weight: ${weight.toFixed(1)}`);
+      console.log(`      Reasoning: ${impactAnalysis.reasoning}`);
+      
+      // Step 4: 启动后续验证（30分钟后检查市场反应）
+      this.scheduleNarrativeVerification(narrativeName);
+      
     } catch (error) {
       console.log(`   ❌ Failed to add narrative: ${error.message}`);
+    }
+  }
+
+  /**
+   * 评估新叙事的潜在影响力
+   * 
+   * 分析维度：
+   * 1. 市场时机 - 是否符合当前市场情绪
+   * 2. 受众规模 - 潜在用户/投资者数量
+   * 3. 病毒传播性 - 是否容易传播
+   * 4. 资金吸引力 - 是否能吸引资金流入
+   * 5. 持续性 - 是否能持续热度
+   */
+  async evaluateNarrativeImpact(narrativeName, data) {
+    const prompt = `你是加密货币市场分析专家。评估以下新叙事的潜在影响力。
+
+新叙事名称：${narrativeName}
+初始数据：
+- 关键词：${(data.keywords || []).join(', ')}
+- 来源 Token：$${data.source_token || 'unknown'}
+- 初始热度：${data.market_heat || 'unknown'}
+- 发现原因：${data.reasoning || 'unknown'}
+
+请从以下 5 个维度评估（每项 0-10 分）：
+
+1. 市场时机 (market_timing)
+   - 当前市场情绪是否适合这个叙事？
+   - 是否有重大事件/催化剂支持？
+
+2. 受众规模 (audience_size)
+   - 潜在投资者/用户有多少？
+   - 是否能吸引圈外用户？
+
+3. 病毒传播性 (virality)
+   - 是否容易在社交媒体传播？
+   - 是否有 meme 潜力？
+
+4. 资金吸引力 (capital_attraction)
+   - VC/大户是否会感兴趣？
+   - 是否有明确的价值主张？
+
+5. 持续性 (sustainability)
+   - 热度能持续多久？
+   - 是短期炒作还是长期趋势？
+
+同时判断：
+- lifecycle_stage: early_explosion / early_growth / growth / peak / mature / decline
+- competition_level: low / medium / high
+
+用 JSON 格式回复：
+{
+  "impact_score": 7.5,
+  "market_timing": 8,
+  "audience_size": 6,
+  "virality": 9,
+  "capital_attraction": 7,
+  "sustainability": 5,
+  "lifecycle_stage": "early_explosion",
+  "lifecycle_multiplier": 1.3,
+  "competition_level": "low",
+  "market_heat": 8,
+  "reasoning": "简短的分析理由（2-3句话）",
+  "risk_factors": ["风险1", "风险2"],
+  "catalysts": ["催化剂1", "催化剂2"]
+}`;
+
+    try {
+      const response = await this.grokClient.askGrok(prompt);
+      const jsonMatch = response.match(/\{[\s\S]*\}/);
+      
+      if (jsonMatch) {
+        const analysis = JSON.parse(jsonMatch[0]);
+        
+        // 计算综合影响力分数
+        if (!analysis.impact_score) {
+          analysis.impact_score = (
+            (analysis.market_timing || 5) * 0.25 +
+            (analysis.audience_size || 5) * 0.15 +
+            (analysis.virality || 5) * 0.25 +
+            (analysis.capital_attraction || 5) * 0.20 +
+            (analysis.sustainability || 5) * 0.15
+          );
+        }
+        
+        // 设置生命周期乘数
+        analysis.lifecycle_multiplier = this.getLifecycleMultiplier(analysis.lifecycle_stage);
+        
+        return analysis;
+      }
+    } catch (error) {
+      console.log(`   ⚠️ Impact evaluation failed: ${error.message}`);
+    }
+    
+    // 默认值（保守估计）
+    return {
+      impact_score: 5,
+      market_heat: data.market_heat || 5,
+      sustainability: 4,
+      lifecycle_stage: 'early_growth',
+      lifecycle_multiplier: 1.2,
+      competition_level: 'medium',
+      reasoning: 'Default evaluation - AI analysis unavailable'
+    };
+  }
+
+  /**
+   * 安排叙事验证（30分钟后检查市场反应）
+   */
+  scheduleNarrativeVerification(narrativeName) {
+    console.log(`   ⏰ Scheduling verification for ${narrativeName} in 30 minutes...`);
+    
+    setTimeout(async () => {
+      await this.verifyNarrativeReaction(narrativeName);
+    }, 30 * 60 * 1000); // 30 分钟后
+  }
+
+  /**
+   * 验证市场对新叙事的反应
+   */
+  async verifyNarrativeReaction(narrativeName) {
+    console.log(`🔍 [AI Narrative] Verifying market reaction to: ${narrativeName}`);
+    
+    const narrative = this.narrativesCache.get(narrativeName);
+    if (!narrative) {
+      console.log(`   Narrative not found in cache, skipping...`);
+      return;
+    }
+    
+    // 搜索这个叙事相关的 Twitter 讨论
+    const keywords = narrative.keywords || [];
+    const searchQuery = keywords.slice(0, 3).join(' OR ');
+    
+    try {
+      const twitterData = await this.grokClient.searchTwitter(searchQuery, 50);
+      
+      const prompt = `你是加密货币市场分析师。验证新叙事的市场反应。
+
+叙事名称：${narrativeName}
+30分钟前预测的影响力：${narrative.weight}/10
+
+当前 Twitter 数据：
+- 搜索词：${searchQuery}
+- 提及数：${twitterData?.mentions || 0}
+- 互动数：${twitterData?.engagement || 0}
+
+问题：
+1. 市场反应是否符合预期？
+2. 热度是上升还是下降？
+3. 是否需要调整影响力评分？
+
+用 JSON 回复：
+{
+  "reaction": "positive" | "neutral" | "negative",
+  "heat_trend": "rising" | "stable" | "declining",
+  "adjusted_weight": 7.5,
+  "reasoning": "简短分析"
+}`;
+
+      const response = await this.grokClient.askGrok(prompt);
+      const jsonMatch = response.match(/\{[\s\S]*\}/);
+      
+      if (jsonMatch) {
+        const verification = JSON.parse(jsonMatch[0]);
+        
+        // 更新数据库
+        this.db.prepare(`
+          UPDATE ai_narratives 
+          SET weight = ?, 
+              ai_reasoning = ai_reasoning || ' | 30min验证: ' || ?,
+              last_updated = ?
+          WHERE narrative_name = ?
+        `).run(
+          verification.adjusted_weight,
+          verification.reasoning,
+          Date.now(),
+          narrativeName
+        );
+        
+        this.loadNarrativesCache();
+        
+        console.log(`   ✅ Verification complete for ${narrativeName}`);
+        console.log(`      Reaction: ${verification.reaction}`);
+        console.log(`      Trend: ${verification.heat_trend}`);
+        console.log(`      Adjusted weight: ${verification.adjusted_weight}`);
+      }
+    } catch (error) {
+      console.log(`   ❌ Verification failed: ${error.message}`);
     }
   }
 
