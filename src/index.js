@@ -595,7 +595,17 @@ class SentimentArbitrageSystem {
         
         // X validation fields
         x_unique_authors_15m: twitterData.unique_authors,
-        x_tier1_hit: twitterData.kol_count >= 1 ? 1 : 0
+        x_tier1_hit: twitterData.kol_count >= 1 ? 1 : 0,
+        
+        // ==========================================
+        // 链上数据（从 snapshot 传入，用于 Graph 评分）
+        // ==========================================
+        chain_data: {
+          liquidity_usd: snapshot.liquidity_usd || 0,
+          top10_percent: snapshot.top10_percent || null,
+          holder_count: snapshot.holder_count || null,
+          current_price: snapshot.current_price || 0
+        }
       };
 
       // Use tokenMetadata (from Step 1) for Narrative detection

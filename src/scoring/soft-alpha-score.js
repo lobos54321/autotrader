@@ -259,26 +259,97 @@ export class SoftAlphaScorer {
   }
 
   /**
-   * Graph Scoring (0-10 points)
+   * Graph Scoring (0-10 points) - 链上数据评分
    *
-   * Simplified:
-   * - Check if channels are upstream (historically good lead time)
-   * - Check if TG and X are synchronized (both rising)
+   * 评估：
+   * - 流动性深度（是否足够交易）
+   * - Top10 持仓集中度（是否有 rug 风险）
+   * - 持仓人数（是否有足够的市场参与）
+   * - TG/Twitter 同步增长（热度验证）
    */
   calculateGraph(socialData) {
-    let score = 5; // Default middle score
-    const reasons = ['Graph analysis: standard'];
+    let score = 0;
+    const reasons = [];
+    const chainData = socialData.chain_data || {};
 
-    // Check TG velocity (if positive and accelerating)
-    if (socialData.tg_velocity && socialData.tg_velocity > 0.3) {
+    // ==========================================
+    // 1. 流动性评分 (0-4 分)
+    // ==========================================
+    const liquidityUSD = chainData.liquidity_usd || 0;
+    
+    if (liquidityUSD >= 100000) {
+      score += 4;
+      reasons.push(`优秀流动性: $${(liquidityUSD/1000).toFixed(0)}K`);
+    } else if (liquidityUSD >= 50000) {
       score += 3;
-      reasons.push('Strong TG velocity');
+      reasons.push(`良好流动性: $${(liquidityUSD/1000).toFixed(0)}K`);
+    } else if (liquidityUSD >= 20000) {
+      score += 2;
+      reasons.push(`一般流动性: $${(liquidityUSD/1000).toFixed(0)}K`);
+    } else if (liquidityUSD >= 10000) {
+      score += 1;
+      reasons.push(`低流动性: $${(liquidityUSD/1000).toFixed(0)}K`);
+    } else if (liquidityUSD > 0) {
+      score += 0;
+      reasons.push(`⚠️ 极低流动性: $${liquidityUSD.toFixed(0)}`);
+    } else {
+      // Pump.fun bonding curve 没有流动性，给默认分
+      score += 2;
+      reasons.push('Bonding Curve (无LP数据)');
     }
 
-    // Check X sync (if X data exists and recent)
+    // ==========================================
+    // 2. Top10 持仓集中度 (0-3 分)
+    // ==========================================
+    const top10Percent = chainData.top10_percent;
+    
+    if (top10Percent !== null && top10Percent !== undefined) {
+      if (top10Percent <= 30) {
+        score += 3;
+        reasons.push(`分散持仓: Top10=${top10Percent.toFixed(1)}%`);
+      } else if (top10Percent <= 50) {
+        score += 2;
+        reasons.push(`中度集中: Top10=${top10Percent.toFixed(1)}%`);
+      } else if (top10Percent <= 70) {
+        score += 1;
+        reasons.push(`较集中: Top10=${top10Percent.toFixed(1)}%`);
+      } else {
+        score += 0;
+        reasons.push(`⚠️ 高度集中: Top10=${top10Percent.toFixed(1)}%`);
+      }
+    } else {
+      // 无数据，给默认分
+      score += 1;
+      reasons.push('持仓数据未知');
+    }
+
+    // ==========================================
+    // 3. 持仓人数 (0-2 分)
+    // ==========================================
+    const holderCount = chainData.holder_count;
+    
+    if (holderCount !== null && holderCount !== undefined) {
+      if (holderCount >= 500) {
+        score += 2;
+        reasons.push(`多持仓人: ${holderCount}人`);
+      } else if (holderCount >= 100) {
+        score += 1;
+        reasons.push(`中等持仓人: ${holderCount}人`);
+      } else {
+        score += 0;
+        reasons.push(`少持仓人: ${holderCount}人`);
+      }
+    } else {
+      score += 1;
+      reasons.push('持仓人数未知');
+    }
+
+    // ==========================================
+    // 4. TG/Twitter 同步验证 (0-1 分)
+    // ==========================================
     if (socialData.x_unique_authors_15m && socialData.x_unique_authors_15m >= 3) {
-      score += 2;
-      reasons.push('TG and X synchronized growth');
+      score += 1;
+      reasons.push('TG+Twitter 同步增长');
     }
 
     return {
@@ -288,47 +359,123 @@ export class SoftAlphaScorer {
   }
 
   /**
-   * Source Scoring (0-10 points)
+   * Source Scoring (0-10 points) - 信号源质量评分
    *
-   * Based on time_lag from earliest mention
-   *
-   * < 5min  → 10 points
-   * 5-15min → 5 points
-   * > 20min → 0 points
+   * 评估：
+   * - 信号时效性（距离第一次提及多久）
+   * - 频道历史表现（胜率、平均收益）- 从数据库查询
    */
   calculateSource(socialData) {
-    const timeLag = socialData.tg_time_lag;
+    let score = 0;
+    const reasons = [];
 
-    if (timeLag === null || timeLag === undefined) {
-      return {
-        score: 0,
-        reasons: ['Source time lag Unknown']
-      };
-    }
+    // ==========================================
+    // 1. 信号时效性 (0-5 分)
+    // ==========================================
+    const timeLag = socialData.tg_time_lag || 0;
 
-    const thresholds = this.config.soft_score_thresholds.source;
-
-    if (timeLag < thresholds.time_lag_excellent_min) {
-      return {
-        score: 10,
-        reasons: [`Excellent timing: ${timeLag} min from first mention`]
-      };
-    } else if (timeLag < thresholds.time_lag_good_min) {
-      return {
-        score: 5,
-        reasons: [`Good timing: ${timeLag} min from first mention`]
-      };
-    } else if (timeLag < thresholds.time_lag_poor_min) {
-      return {
-        score: 2,
-        reasons: [`Late: ${timeLag} min from first mention`]
-      };
+    if (timeLag <= 2) {
+      score += 5;
+      reasons.push(`极早信号: ${timeLag}分钟`);
+    } else if (timeLag <= 5) {
+      score += 4;
+      reasons.push(`早期信号: ${timeLag}分钟`);
+    } else if (timeLag <= 10) {
+      score += 3;
+      reasons.push(`及时信号: ${timeLag}分钟`);
+    } else if (timeLag <= 15) {
+      score += 2;
+      reasons.push(`一般时效: ${timeLag}分钟`);
+    } else if (timeLag <= 30) {
+      score += 1;
+      reasons.push(`较晚信号: ${timeLag}分钟`);
     } else {
-      return {
-        score: 0,
-        reasons: [`Too late: ${timeLag} min from first mention (missed early entry)`]
-      };
+      score += 0;
+      reasons.push(`⚠️ 过时信号: ${timeLag}分钟`);
     }
+
+    // ==========================================
+    // 2. 频道历史表现 (0-5 分) - 从数据库查询
+    // ==========================================
+    const channelName = socialData.channel_name;
+    let channelPerformance = null;
+
+    try {
+      if (this.db && channelName) {
+        // 查询这个频道过去 7 天的表现
+        const sevenDaysAgo = Math.floor(Date.now() / 1000) - (7 * 24 * 60 * 60);
+        
+        const stats = this.db.prepare(`
+          SELECT 
+            COUNT(*) as total_trades,
+            SUM(CASE WHEN pnl_percent > 0 THEN 1 ELSE 0 END) as winning_trades,
+            AVG(pnl_percent) as avg_pnl,
+            MAX(pnl_percent) as best_trade,
+            MIN(pnl_percent) as worst_trade
+          FROM positions p
+          JOIN telegram_signals s ON p.signal_id = s.id
+          WHERE s.channel_name = ? 
+            AND p.status = 'closed'
+            AND p.created_at >= ?
+        `).get(channelName, sevenDaysAgo);
+
+        if (stats && stats.total_trades >= 3) {
+          channelPerformance = {
+            total: stats.total_trades,
+            winRate: (stats.winning_trades / stats.total_trades) * 100,
+            avgPnl: stats.avg_pnl || 0,
+            bestTrade: stats.best_trade || 0,
+            worstTrade: stats.worst_trade || 0
+          };
+        }
+      }
+    } catch (e) {
+      // 数据库查询失败，忽略
+    }
+
+    if (channelPerformance) {
+      const winRate = channelPerformance.winRate;
+      const avgPnl = channelPerformance.avgPnl;
+
+      // 基于胜率评分
+      if (winRate >= 60) {
+        score += 3;
+        reasons.push(`高胜率频道: ${winRate.toFixed(0)}%`);
+      } else if (winRate >= 45) {
+        score += 2;
+        reasons.push(`中等胜率: ${winRate.toFixed(0)}%`);
+      } else if (winRate >= 30) {
+        score += 1;
+        reasons.push(`较低胜率: ${winRate.toFixed(0)}%`);
+      } else {
+        score += 0;
+        reasons.push(`⚠️ 低胜率: ${winRate.toFixed(0)}%`);
+      }
+
+      // 基于平均收益评分
+      if (avgPnl >= 50) {
+        score += 2;
+        reasons.push(`高平均收益: +${avgPnl.toFixed(0)}%`);
+      } else if (avgPnl >= 20) {
+        score += 1;
+        reasons.push(`正向收益: +${avgPnl.toFixed(0)}%`);
+      } else if (avgPnl >= 0) {
+        score += 0;
+        reasons.push(`微利: ${avgPnl.toFixed(0)}%`);
+      } else {
+        score -= 1; // 负收益扣分
+        reasons.push(`⚠️ 负收益: ${avgPnl.toFixed(0)}%`);
+      }
+    } else {
+      // 没有历史数据，给中等分数
+      score += 2;
+      reasons.push('新频道(无历史数据)');
+    }
+
+    return {
+      score: Math.max(0, Math.min(10, score)),
+      reasons
+    };
   }
 
   /**
