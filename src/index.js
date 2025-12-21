@@ -29,6 +29,7 @@ import { PositionMonitor } from './execution/position-monitor.js';
 import GrokTwitterClient from './social/grok-twitter-client.js';
 import { PermanentBlacklistService } from './database/permanent-blacklist.js';
 import { SignalSourceOptimizer } from './scoring/signal-source-optimizer.js';
+import { ShadowPriceTracker } from './tracking/shadow-price-tracker.js';
 
 dotenv.config();
 
@@ -53,6 +54,15 @@ class SentimentArbitrageSystem {
     
     // Signal Source Optimizer - auto-optimize for higher win rate
     this.sourceOptimizer = new SignalSourceOptimizer(this.config, this.db);
+    
+    // Shadow Price Tracker - track prices in shadow mode for source evaluation
+    this.shadowTracker = new ShadowPriceTracker(
+      this.config, 
+      this.db, 
+      this.solService, 
+      this.bscService,
+      this.sourceOptimizer
+    );
 
     // System state
     this.isRunning = false;
@@ -348,6 +358,9 @@ class SentimentArbitrageSystem {
         token_ca, 
         chain
       );
+      
+      // Store for shadow tracking later
+      this.lastSignalOutcomeId = signalOutcomeId;
 
       // ==========================================
       // STEP 0: PERMANENT BLACKLIST CHECK
@@ -530,6 +543,24 @@ class SentimentArbitrageSystem {
       console.log(`      - Source: ${scoreResult.breakdown.source.score.toFixed(1)}`);
 
       this.stats.soft_score_computed++;
+      
+      // ==========================================
+      // SHADOW MODE: Track price for source evaluation
+      // ==========================================
+      if (this.config.SHADOW_MODE && snapshot.current_price > 0) {
+        // Get the signal outcome ID we recorded earlier
+        const signalOutcomeId = this.lastSignalOutcomeId || null;
+        
+        this.shadowTracker.trackSignal(
+          token_ca,
+          chain,
+          snapshot.current_price,
+          snapshot.liquidity_usd || 0,
+          'telegram',
+          channel_name,
+          signalOutcomeId
+        );
+      }
 
       // ==========================================
       // STEP 3.5: EXIT GATE (can we exit if we enter?)
