@@ -3,18 +3,25 @@
  *
  * Combines all scoring modules and applies adjustments
  *
- * Total Formula:
- * Score = 0.25×Narrative + 0.25×Influence + 0.30×TG_Spread + 0.10×Graph + 0.10×Source
+ * 评分维度（满分 100）：
+ * - Narrative: 0-25 分 - 叙事匹配度
+ * - Influence: 0-25 分 - 影响力（频道+KOL）
+ * - TG_Spread: 0-30 分 - TG传播热度
+ * - Graph: 0-10 分 - 链上数据
+ * - Source: 0-10 分 - 信号源质量
  *
- * Adjustments:
- * - Matrix Penalty (from TG_Spread, can be -20)
- * - X Validation (if x_authors < 2, multiply by 0.8)
+ * 动态调整：
+ * - 信号聚合加成（多频道同时提及）
+ * - 时间衰减（信号越老分数越低）
+ * - 叙事热度（热门叙事加成）
+ * - 聪明钱动向（流入加分，流出减分）
  */
 
 import TGSpreadScoring from './tg-spread.js';
 import NarrativeDetector from './narrative-detector.js';
 import { AINarrativeSystem } from './ai-narrative-system.js';
 import { AIInfluencerSystem } from './ai-influencer-system.js';
+import { DynamicScoringManager } from './dynamic-scoring-manager.js';
 
 export class SoftAlphaScorer {
   constructor(config, db) {
@@ -30,9 +37,13 @@ export class SoftAlphaScorer {
     this.aiNarrativeSystem = new AINarrativeSystem(config, db);
     this.aiInfluencerSystem = new AIInfluencerSystem(config, db);
     
+    // Initialize dynamic scoring manager
+    this.dynamicScoring = new DynamicScoringManager(config, db);
+    
     // Flags to use AI systems (can be toggled)
     this.useAINarrative = true;
     this.useAIInfluencer = true;
+    this.useDynamicScoring = true;
   }
 
   /**
@@ -44,6 +55,9 @@ export class SoftAlphaScorer {
    */
   async calculate(socialData, tokenData) {
     console.log(`🎯 [Soft Score] Calculating for ${tokenData.token_ca}`);
+    
+    // Get channel name for dynamic scoring
+    const channelName = socialData.channels?.[0] || socialData.channel_name || 'Unknown';
 
     // Component scores - use AI narrative if enabled
     let narrative;
@@ -79,9 +93,6 @@ export class SoftAlphaScorer {
         top_tweets: socialData.top_tweets || []
       };
       
-      // Get channel name from socialData
-      const channelName = socialData.channels?.[0] || socialData.channel_name || '';
-      
       influence = this.aiInfluencerSystem.calculateInfluenceScore(channelName, twitterData);
       
       // Log AI influence detection
@@ -105,13 +116,51 @@ export class SoftAlphaScorer {
       source.score;
 
     // Matrix Penalty (already in TG_Spread score, but track separately)
-    const matrixPenalty = tgSpread.breakdown.matrix_penalty.penalty;
+    const matrixPenalty = tgSpread.breakdown?.matrix_penalty?.penalty || 0;
 
     // X Validation adjustment
     const xMultiplier = this.calculateXValidationMultiplier(socialData);
 
+    // 基础分数
+    let baseScore = rawScore * xMultiplier;
+    
+    // ==========================================
+    // 动态评分调整
+    // ==========================================
+    let dynamicAdjustments = null;
+    let dynamicReasons = [];
+    
+    if (this.useDynamicScoring && this.dynamicScoring) {
+      try {
+        // 获取所有动态调整
+        dynamicAdjustments = this.dynamicScoring.getAllDynamicAdjustments(
+          tokenData.token_ca,
+          channelName,
+          narrative.narrative || narrative.narrative_name
+        );
+        
+        // 应用动态调整
+        const dynamicResult = this.dynamicScoring.applyDynamicAdjustments(baseScore, dynamicAdjustments);
+        baseScore = dynamicResult.score;
+        dynamicReasons = dynamicResult.reasons;
+        
+        // 如果有显著调整，打印日志
+        if (dynamicAdjustments.aggregation.boost > 0) {
+          console.log(`   🔗 [Dynamic] 多频道聚合: ${dynamicAdjustments.aggregation.channelCount}个频道 +${dynamicAdjustments.aggregation.boost}pts`);
+        }
+        if (dynamicAdjustments.timeDecay.multiplier < 0.9) {
+          console.log(`   ⏰ [Dynamic] 时间衰减: ${dynamicAdjustments.timeDecay.ageMinutes}分钟 (${(dynamicAdjustments.timeDecay.multiplier * 100).toFixed(0)}%)`);
+        }
+        if (dynamicAdjustments.smartMoney.adjustment !== 0) {
+          console.log(`   🐋 [Dynamic] 聪明钱: ${dynamicAdjustments.smartMoney.reason}`);
+        }
+      } catch (e) {
+        console.error(`   ⚠️ [Dynamic Scoring] Error: ${e.message}`);
+      }
+    }
+
     // Final score
-    const finalScore = Math.max(0, Math.min(100, rawScore * xMultiplier));
+    const finalScore = Math.max(0, Math.min(100, baseScore));
 
     return {
       score: Math.round(finalScore),
@@ -124,9 +173,10 @@ export class SoftAlphaScorer {
       },
       adjustments: {
         matrix_penalty: matrixPenalty,
-        x_multiplier: xMultiplier
+        x_multiplier: xMultiplier,
+        dynamic: dynamicAdjustments
       },
-      reasons: this.aggregateReasons([narrative, influence, tgSpread, graph, source])
+      reasons: [...this.aggregateReasons([narrative, influence, tgSpread, graph, source]), ...dynamicReasons]
     };
   }
 
