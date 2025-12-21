@@ -94,13 +94,15 @@ export class SoftAlphaScorer {
     const graph = this.calculateGraph(socialData);
     const source = this.calculateSource(socialData);
 
-    // Weighted sum (before adjustments)
+    // 直接相加（每个维度的满分已经代表了权重）
+    // Narrative: 0-25, Influence: 0-25, TG_Spread: 0-30, Graph: 0-10, Source: 0-10
+    // 总分满分 = 25 + 25 + 30 + 10 + 10 = 100
     const rawScore =
-      narrative.score * this.weights.Narrative +
-      influence.score * this.weights.Influence +
-      tgSpread.score * this.weights.TG_Spread +
-      graph.score * this.weights.Graph +
-      source.score * this.weights.Source;
+      narrative.score +
+      influence.score +
+      tgSpread.score +
+      graph.score +
+      source.score;
 
     // Matrix Penalty (already in TG_Spread score, but track separately)
     const matrixPenalty = tgSpread.breakdown.matrix_penalty.penalty;
