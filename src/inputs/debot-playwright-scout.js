@@ -220,20 +220,20 @@ export class DebotPlaywrightScout extends EventEmitter {
     /**
      * 处理 Rank API 数据 (最丰富的代币信息)
      */
-    handleRankData(tokens) {
+    async handleRankData(tokens) {
         if (!tokens || tokens.length === 0) return;
         
         console.log(`[DeBot Scout] 📊 Rank API: ${tokens.length} 个热门代币`);
         
         for (const token of tokens) {
-            this.processRankToken(token);
+            await this.processRankToken(token);
         }
     }
     
     /**
      * 处理单个 Rank 代币
      */
-    processRankToken(token) {
+    async processRankToken(token) {
         const tokenAddress = token.address;
         if (!tokenAddress) return;
         
@@ -246,15 +246,26 @@ export class DebotPlaywrightScout extends EventEmitter {
         }
         this.lastSeenTokens.set(cacheKey, now);
         
-        // 检测链
-        const chain = token.chain === 'solana' ? 'sol' : 
-                     token.chain === 'bsc' ? 'bsc' : 
-                     tokenAddress.startsWith('0x') ? 'bsc' : 'sol';
+        // 检测链 - 使用大写以匹配数据库约束
+        const chain = token.chain === 'solana' ? 'SOL' : 
+                     token.chain === 'bsc' ? 'BSC' : 
+                     tokenAddress.startsWith('0x') ? 'BSC' : 'SOL';
         
         // 提取 market_info
         const marketInfo = token.market_info || {};
         const pairInfo = token.pair_summary_info || {};
         const socialInfo = token.social_info || {};
+        
+        // 第一层漏斗：检查聪明钱数量和流动性
+        const smartWalletOnline = token.smart_wallet_online_count || 0;
+        const liquidity = pairInfo.liquidity || 0;
+        const isMintAbandoned = token.safe_info?.solana?.is_mint_abandoned === 1;
+        
+        // 只有通过第一层漏斗的代币才调用 AI Report
+        let aiReport = null;
+        if (smartWalletOnline >= 2 && liquidity >= 10000) {
+            aiReport = await this.fetchAIReport(tokenAddress);
+        }
         
         // 构建信号
         const signal = {
@@ -271,7 +282,7 @@ export class DebotPlaywrightScout extends EventEmitter {
             logo: token.logo || '',
             
             // 聪明钱数据 - Rank API 特有
-            smart_wallet_online: token.smart_wallet_online_count || 0,
+            smart_wallet_online: smartWalletOnline,
             smart_wallet_total: token.smart_wallet_total_count || 0,
             smart_money_count: token.smart_wallet_total_count || 0,
             
@@ -288,7 +299,7 @@ export class DebotPlaywrightScout extends EventEmitter {
             volume: marketInfo.volume || 0,
             buys: marketInfo.buys || 0,
             sells: marketInfo.sells || 0,
-            liquidity: pairInfo.liquidity || 0,
+            liquidity: liquidity,
             
             // 价格变化
             priceChange5m: marketInfo.percent_5m || 0,
@@ -301,7 +312,14 @@ export class DebotPlaywrightScout extends EventEmitter {
             description: socialInfo.description || '',
             
             // 安全信息
-            isMintAbandoned: token.safe_info?.solana?.is_mint_abandoned === 1,
+            isMintAbandoned: isMintAbandoned,
+            
+            // AI Report 数据 (如果有)
+            aiReport: aiReport,
+            aiScore: aiReport?.rating?.score ? parseInt(aiReport.rating.score) : null,
+            aiNarrative: aiReport?.background?.origin?.text || null,
+            aiNarrativeType: aiReport?.narrative_type || null,
+            hasNegativeIncidents: aiReport?.distribution?.negative_incidents?.text ? true : false,
             
             timestamp: now,
             raw: token
@@ -312,10 +330,51 @@ export class DebotPlaywrightScout extends EventEmitter {
                          signal.tokenTier === 'silver' ? '🥈' : '🔥';
         console.log(`[DeBot Scout] ${tierEmoji} Rank代币: ${signal.symbol} (${tokenAddress.slice(0, 8)}...)`);
         console.log(`   🐋 聪明钱: ${signal.smart_wallet_online}在线/${signal.smart_wallet_total}总数`);
-        console.log(`   📊 市值: $${(signal.marketCap/1000).toFixed(1)}K, 活跃度: ${(signal.activityScore*100).toFixed(0)}%`);
+        console.log(`   📊 市值: $${(signal.marketCap/1000).toFixed(1)}K, 流动性: $${(signal.liquidity/1000).toFixed(1)}K`);
+        if (signal.aiScore) {
+            console.log(`   🤖 AI评分: ${signal.aiScore}/10, 叙事: ${signal.aiNarrativeType || 'Unknown'}`);
+        }
         
         // 发送信号
         this.emit('signal', signal);
+    }
+    
+    /**
+     * 获取 AI Report (叙事分析)
+     * API: GET https://debot.ai/api/v1/nitter/story/latest?ca_address={TOKEN_ADDRESS}
+     */
+    async fetchAIReport(tokenAddress) {
+        try {
+            const url = `https://debot.ai/api/v1/nitter/story/latest?ca_address=${tokenAddress}`;
+            
+            // 使用 Playwright page 发起请求 (复用 session cookies)
+            const response = await this.page.evaluate(async (url) => {
+                try {
+                    const res = await fetch(url, {
+                        method: 'GET',
+                        headers: {
+                            'Accept': 'application/json',
+                        },
+                        credentials: 'include'
+                    });
+                    if (!res.ok) return null;
+                    return await res.json();
+                } catch (e) {
+                    return null;
+                }
+            }, url);
+            
+            if (response?.success && response?.data?.history?.story) {
+                const story = response.data.history.story;
+                console.log(`[DeBot Scout] 📖 AI Report: ${story.project_name}, 评分: ${story.rating?.score || 'N/A'}`);
+                return story;
+            }
+            
+            return null;
+        } catch (error) {
+            console.log(`[DeBot Scout] ⚠️ AI Report 获取失败: ${error.message}`);
+            return null;
+        }
     }
     
     /**
@@ -354,8 +413,8 @@ export class DebotPlaywrightScout extends EventEmitter {
         }
         this.lastSeenTokens.set(cacheKey, now);
         
-        // 检测链 - SOL 地址通常不以 0x 开头
-        const chain = tokenAddress.startsWith('0x') ? 'bsc' : 'sol';
+        // 检测链 - SOL 地址通常不以 0x 开头，使用大写
+        const chain = tokenAddress.startsWith('0x') ? 'BSC' : 'SOL';
         
         // 构建信号 - 使用 injectSignal 兼容的字段名
         const signal = {
@@ -416,10 +475,10 @@ export class DebotPlaywrightScout extends EventEmitter {
         }
         this.lastSeenTokens.set(tokenAddress, Date.now());
         
-        // 检测链
-        const chain = (item.chain || 'sol').toLowerCase();
-        const normalizedChain = chain.includes('bsc') || chain.includes('bnb') ? 'bsc' : 
-                                chain.includes('sol') || chain.includes('solana') ? 'sol' : chain;
+        // 检测链 - 使用大写
+        const chain = (item.chain || 'SOL').toUpperCase();
+        const normalizedChain = chain.includes('BSC') || chain.includes('BNB') ? 'BSC' : 
+                                chain.includes('SOL') || chain.includes('SOLANA') ? 'SOL' : chain;
         
         // 提取信号详情 - 使用 injectSignal 期望的字段名
         const signal = {
