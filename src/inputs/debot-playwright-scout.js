@@ -160,29 +160,40 @@ export class DebotPlaywrightScout extends EventEmitter {
     /**
      * 处理信号数据 (AI信号卡片)
      * 
-     * DeBot heatmap API 返回格式:
+     * DeBot API 返回格式:
+     * 
+     * 1. Heatmap API (信号统计):
      * {
      *   data: {
      *     meta: {
-     *       signals: {
-     *         "代币地址": {
-     *           signal_count: 8,
-     *           first_time: 1766365322,
-     *           first_price: 0.0000354959,
-     *           max_price: 0.0004324634,
-     *           max_price_gain: 11.18,  // 最大涨幅倍数
-     *           token_level: "silver"   // bronze/silver/gold
-     *         }
-     *       }
-     *     },
-     *     heatmap: [...]
+     *       signals: { "代币地址": { signal_count, max_price_gain, token_level } }
+     *     }
      *   }
+     * }
+     * 
+     * 2. Rank API (热门代币详情) - 最丰富的数据!
+     * {
+     *   data: [
+     *     {
+     *       address, symbol, name, logo,
+     *       market_info: { price, holders, mkt_cap, volume, buys, sells },
+     *       pair_summary_info: { liquidity },
+     *       smart_wallet_online_count, smart_wallet_total_count,
+     *       max_price_gain, token_tier, activity_score
+     *     }
+     *   ]
      * }
      */
     handleSignalData(url, data) {
-        // 检查是否是 heatmap API (包含 meta.signals)
+        // 1. Heatmap API (包含 meta.signals)
         if (data?.data?.meta?.signals) {
             this.handleHeatmapSignals(data.data.meta.signals);
+            return;
+        }
+        
+        // 2. Rank API (activity/rank) - 包含最丰富的代币数据
+        if (url.includes('activity/rank') && data?.data && Array.isArray(data.data)) {
+            this.handleRankData(data.data);
             return;
         }
         
@@ -196,7 +207,6 @@ export class DebotPlaywrightScout extends EventEmitter {
         else if (Array.isArray(data)) items = data;
         
         if (items.length === 0) {
-            // 不再打印警告，减少日志噪音
             return;
         }
         
@@ -205,6 +215,107 @@ export class DebotPlaywrightScout extends EventEmitter {
         for (const item of items) {
             this.processSignalItem(item);
         }
+    }
+    
+    /**
+     * 处理 Rank API 数据 (最丰富的代币信息)
+     */
+    handleRankData(tokens) {
+        if (!tokens || tokens.length === 0) return;
+        
+        console.log(`[DeBot Scout] 📊 Rank API: ${tokens.length} 个热门代币`);
+        
+        for (const token of tokens) {
+            this.processRankToken(token);
+        }
+    }
+    
+    /**
+     * 处理单个 Rank 代币
+     */
+    processRankToken(token) {
+        const tokenAddress = token.address;
+        if (!tokenAddress) return;
+        
+        // 检查是否重复 (30分钟内)
+        const cacheKey = `rank:${tokenAddress}`;
+        const now = Date.now();
+        if (this.lastSeenTokens.has(cacheKey)) {
+            const lastSeen = this.lastSeenTokens.get(cacheKey);
+            if (now - lastSeen < 30 * 60 * 1000) return;
+        }
+        this.lastSeenTokens.set(cacheKey, now);
+        
+        // 检测链
+        const chain = token.chain === 'solana' ? 'sol' : 
+                     token.chain === 'bsc' ? 'bsc' : 
+                     tokenAddress.startsWith('0x') ? 'bsc' : 'sol';
+        
+        // 提取 market_info
+        const marketInfo = token.market_info || {};
+        const pairInfo = token.pair_summary_info || {};
+        const socialInfo = token.social_info || {};
+        
+        // 构建信号
+        const signal = {
+            source: 'DeBot_Rank',
+            type: 'HOT_TOKEN',
+            emoji: token.token_tier === 'gold' ? '🥇' : 
+                   token.token_tier === 'silver' ? '🥈' : '🔥',
+            action: 'watch',
+            chain: chain,
+            token_ca: tokenAddress,
+            tokenAddress: tokenAddress,
+            symbol: token.symbol || 'Unknown',
+            tokenName: token.name || token.symbol || 'Unknown',
+            logo: token.logo || '',
+            
+            // 聪明钱数据 - Rank API 特有
+            smart_wallet_online: token.smart_wallet_online_count || 0,
+            smart_wallet_total: token.smart_wallet_total_count || 0,
+            smart_money_count: token.smart_wallet_total_count || 0,
+            
+            // 代币等级和分数
+            tokenTier: token.token_tier || '',
+            tokenLevel: token.token_tier || 'bronze',
+            activityScore: token.activity_score || 0,
+            maxPriceGain: token.max_price_gain || 0,
+            
+            // 市场数据
+            price: marketInfo.price || 0,
+            marketCap: marketInfo.mkt_cap || marketInfo.fdv || 0,
+            holders: marketInfo.holders || 0,
+            volume: marketInfo.volume || 0,
+            buys: marketInfo.buys || 0,
+            sells: marketInfo.sells || 0,
+            liquidity: pairInfo.liquidity || 0,
+            
+            // 价格变化
+            priceChange5m: marketInfo.percent_5m || 0,
+            priceChange1h: marketInfo.percent_1h || 0,
+            priceChange24h: marketInfo.percent_24h || 0,
+            
+            // 社交信息
+            twitter: socialInfo.twitter || '',
+            website: socialInfo.website || '',
+            description: socialInfo.description || '',
+            
+            // 安全信息
+            isMintAbandoned: token.safe_info?.solana?.is_mint_abandoned === 1,
+            
+            timestamp: now,
+            raw: token
+        };
+        
+        // 打印信号信息
+        const tierEmoji = signal.tokenTier === 'gold' ? '🥇' : 
+                         signal.tokenTier === 'silver' ? '🥈' : '🔥';
+        console.log(`[DeBot Scout] ${tierEmoji} Rank代币: ${signal.symbol} (${tokenAddress.slice(0, 8)}...)`);
+        console.log(`   🐋 聪明钱: ${signal.smart_wallet_online}在线/${signal.smart_wallet_total}总数`);
+        console.log(`   📊 市值: $${(signal.marketCap/1000).toFixed(1)}K, 活跃度: ${(signal.activityScore*100).toFixed(0)}%`);
+        
+        // 发送信号
+        this.emit('signal', signal);
     }
     
     /**
