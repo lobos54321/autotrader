@@ -41,53 +41,95 @@ Search Twitter/X for this SPECIFIC crypto token:
 - Contract Address: ${tokenCA || 'unknown'}
 - Chain: ${tokenCA?.startsWith('0x') ? 'BSC/ETH' : 'Solana'}
 
-IMPORTANT: There may be MULTIPLE tokens with the same symbol "$${tokenSymbol}". 
-You MUST verify the token by checking if tweets mention:
-- The contract address (full or partial): ${caPrefix}
-- Or the exact token on the correct chain
+IMPORTANT VERIFICATION RULES:
+1. There may be MULTIPLE tokens with symbol "$${tokenSymbol}" - verify by contract address
+2. Look for tweets mentioning address prefix: ${caPrefix}
+3. Only count tweets from the LAST ${timeframeMinutes} minutes
 
-Search for tweets from the LAST ${timeframeMinutes} minutes only.
+CRITICAL - SIGNAL ORIGIN ANALYSIS:
+For each tweet, determine:
+- Is the author the ORIGINAL source, or just QUOTING/MENTIONING someone else?
+- If tweet says "@bigKOL bought this" but @bigKOL didn't actually tweet it - that's FAKE
+- Check if KOLs ACTUALLY posted about this token themselves (not just being mentioned)
 
-Look for tweets containing:
-1. "$${tokenSymbol}" + any part of the address "${caPrefix}"
-2. "$${tokenSymbol}" on Solana/BSC (depending on chain)
-3. Links to dexscreener/birdeye/gmgn with this token
+AUTHENTICITY CHECKS:
+- Real KOL signal: KOL's own account posted about the token
+- Fake/borrowed hype: Random accounts claiming "KOL bought this" without proof
+- Bot activity: Many similar tweets from low-follower accounts at same time
+- Organic spread: Different users discovering and sharing naturally
 
-Analyze and return JSON:
+Return JSON:
 {
-  "mention_count": <number of tweets about THIS SPECIFIC token>,
-  "unique_authors": <number of different accounts>,
-  "engagement": <total likes + retweets>,
-  "sentiment": "positive/neutral/negative",
-  "kol_count": <influencers with >10k followers>,
-  "first_mention": {
-    "author": "@username of FIRST person to tweet about this token",
-    "time_ago": "X minutes ago",
-    "is_kol": true/false,
-    "followers": <follower count>
+  "mention_count": <tweets about THIS token with matching address>,
+  "unique_authors": <different accounts>,
+  "engagement": {
+    "total_likes": <sum of likes>,
+    "total_retweets": <sum of retweets>,
+    "total_views": <sum of views if available>,
+    "avg_engagement_per_tweet": <average>
   },
-  "origin_analysis": "<who started this hype? KOL/bot/organic community>",
+  "sentiment": "positive/neutral/negative",
+  
+  "origin_source": {
+    "type": "kol_original/kol_mentioned_fake/bot_swarm/organic/unknown",
+    "first_tweet": {
+      "author": "@username",
+      "followers": <count>,
+      "verified": true/false,
+      "tweet_text": "actual tweet content",
+      "posted_time": "X minutes ago",
+      "engagement": {"likes": X, "retweets": X, "views": X}
+    },
+    "is_authentic": true/false,
+    "explanation": "<why you think this is authentic or fake>"
+  },
+  
+  "kol_involvement": {
+    "kols_who_actually_posted": [
+      {"username": "@xxx", "followers": X, "tweet_engagement": X}
+    ],
+    "kols_just_mentioned_by_others": ["@yyy", "@zzz"],
+    "real_kol_count": <KOLs who actually posted>,
+    "fake_kol_mentions": <times KOLs mentioned but didn't post>
+  },
+  
+  "bot_detection": {
+    "suspected_bot_tweets": <count of likely bot tweets>,
+    "bot_indicators": ["similar text", "low followers", "same timestamp", etc],
+    "organic_tweet_ratio": <0.0-1.0, higher = more organic>
+  },
+  
+  "spread_pattern": {
+    "pattern": "kol_driven/bot_driven/organic_viral/pump_group",
+    "velocity": "slow/medium/fast/explosive",
+    "geographic_spread": "single_region/multi_region/global"
+  },
+  
   "verified_token": true/false,
   "confidence": "high/medium/low",
+  "risk_flags": ["list of concerns if any"],
+  
   "top_tweets": [
     {
       "text": "tweet content",
-      "author": "@username", 
-      "engagement": <likes + retweets>,
-      "is_kol": true/false
+      "author": "@username",
+      "followers": <count>,
+      "engagement": {"likes": X, "retweets": X},
+      "is_original_source": true/false,
+      "is_bot_suspected": true/false
     }
   ]
 }
 
-If you cannot find tweets about THIS SPECIFIC token (with matching address), return:
+If no tweets found matching the contract address:
 {
   "mention_count": 0,
   "verified_token": false,
   "confidence": "low",
-  "reason": "No tweets found matching the contract address"
+  "reason": "No tweets found matching contract address"
 }
 
-Return ONLY the JSON, no other text.
+Return ONLY the JSON.
 `;
 
     try {
