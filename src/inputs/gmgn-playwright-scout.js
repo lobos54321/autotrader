@@ -30,7 +30,7 @@ export class GMGNPlaywrightScout extends EventEmitter {
         super();
         
         this.config = {
-            sessionPath: config.sessionPath || path.join(__dirname, '../config/gmgn_session.json'),
+            sessionPath: config.sessionPath || path.join(__dirname, '../../config/gmgn_session.json'),
             chains: config.chains || ['sol'],
             refreshInterval: config.refreshInterval || 15000 + Math.random() * 5000, // 15-20秒随机
             headless: config.headless !== false,
