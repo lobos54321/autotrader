@@ -140,8 +140,13 @@ export class DebotPlaywrightScout extends EventEmitter {
                 
                 // 信号/榜单 API - 这是核心数据！
                 if (url.includes('signal') || url.includes('rank') || url.includes('list')) {
-                    console.log(`[DeBot Scout] 📡 信号API: ${shortUrl}`);
-                    this.handleSignalData(url, data);
+                    const endpoint = url.includes('activity/rank') ? 'activity/rank' :
+                                    url.includes('channel/heatmap') ? 'channel/heatmap' :
+                                    url.includes('channel/list') ? 'channel/list' :
+                                    shortUrl;
+
+                    console.log(`[DeBot Scout] 📡 信号API: ${endpoint}`);
+                    await this.handleSignalData(url, data);
                     return;
                 }
                 
@@ -210,7 +215,14 @@ export class DebotPlaywrightScout extends EventEmitter {
             return;
         }
         
+        const first = items[0];
+        const firstAddr = first?.token_address || first?.tokenAddress || first?.address || first?.mint || first?.contract || first?.token || first?.ca;
+        const firstKeys = first ? Object.keys(first).slice(0, 20) : [];
+
         console.log(`[DeBot Scout] 📊 获取到 ${items.length} 个 List 信号代币`);
+        if (first) {
+            console.log(`[DeBot Scout] 🧾 List样例: token=${firstAddr ? firstAddr.slice(0, 12) + '...' : 'N/A'} keys=[${firstKeys.join(', ')}]`);
+        }
         
         for (const item of items) {
             await this.processSignalItem(item);
@@ -223,7 +235,13 @@ export class DebotPlaywrightScout extends EventEmitter {
     async handleRankData(tokens) {
         if (!tokens || tokens.length === 0) return;
         
+        const first = tokens[0];
+        const firstKeys = first ? Object.keys(first).slice(0, 20) : [];
+
         console.log(`[DeBot Scout] 📊 Rank API: ${tokens.length} 个热门代币`);
+        if (first) {
+            console.log(`[DeBot Scout] 🧾 Rank样例: symbol=${first.symbol || 'N/A'} addr=${first.address ? first.address.slice(0, 12) + '...' : 'N/A'} keys=[${firstKeys.join(', ')}]`);
+        }
         
         for (const token of tokens) {
             await this.processRankToken(token);
@@ -526,7 +544,12 @@ export class DebotPlaywrightScout extends EventEmitter {
         const tokenAddresses = Object.keys(signals);
         if (tokenAddresses.length === 0) return;
         
-        console.log(`[DeBot Scout] 📊 获取到 ${tokenAddresses.length} 个 AI 信号代币`);
+        console.log(`[DeBot Scout] 📊 获取到 ${tokenAddresses.length} 个 Heatmap AI 信号代币`);
+        const sampleAddr = tokenAddresses[0];
+        if (sampleAddr) {
+            const sampleKeys = Object.keys(signals[sampleAddr] || {}).slice(0, 20);
+            console.log(`[DeBot Scout] 🧾 Heatmap样例: token=${sampleAddr.slice(0, 12)}... keys=[${sampleKeys.join(', ')}]`);
+        }
         
         // 按 signal_count 或 max_price_gain 排序
         const sortedTokens = tokenAddresses
