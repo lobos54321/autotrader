@@ -34,6 +34,7 @@ export class DebotPlaywrightScout extends EventEmitter {
         this.isRunning = false;
         this.refreshTimer = null;
         this.lastSeenTokens = new Map();
+        this.cardState = new Map();
         
         console.log('[DeBot Scout] Playwright 模式初始化');
     }
@@ -255,14 +256,7 @@ export class DebotPlaywrightScout extends EventEmitter {
         const tokenAddress = token.address;
         if (!tokenAddress) return;
         
-        // 检查是否重复 (30分钟内)
-        const cacheKey = `rank:${tokenAddress}`;
         const now = Date.now();
-        if (this.lastSeenTokens.has(cacheKey)) {
-            const lastSeen = this.lastSeenTokens.get(cacheKey);
-            if (now - lastSeen < 30 * 60 * 1000) return;
-        }
-        this.lastSeenTokens.set(cacheKey, now);
         
         // 检测链 - 使用大写以匹配数据库约束
         const chain = token.chain === 'solana' ? 'SOL' : 
@@ -362,12 +356,27 @@ export class DebotPlaywrightScout extends EventEmitter {
             timestamp: now,
             raw: token
         };
-        
+
+        // UI 对齐：同币聚合成卡片，变化才计数+1（并记录本次价格）
+        const sig = [
+            signal.smart_wallet_online,
+            signal.smart_wallet_total,
+            Number(signal.price || 0).toFixed(12),
+            Math.round(Number(signal.marketCap || 0)),
+            Math.round(Number(signal.liquidity || 0)),
+            Math.round(Number(signal.volume || 0)),
+            signal.buys,
+            signal.sells
+        ].join('|');
+        const state = this.updateCardState(`rank:${tokenAddress}`, sig);
+        if (!state.changed) return;
+        signal.alertCount = state.count;
+
         // 打印完整信号信息 (让后台可见)
         const tierEmoji = signal.tokenTier === 'gold' ? '🥇' : 
                          signal.tokenTier === 'silver' ? '🥈' : '🔥';
         console.log(`\n[DeBot Scout] ═══════════════════════════════════════════════════════════════`);
-        console.log(`[DeBot Scout] ${tierEmoji} HOT TOKEN: ${signal.symbol} (${signal.tokenName})`);
+        console.log(`[DeBot Scout] ${tierEmoji} HOT TOKEN #${signal.alertCount}: ${signal.symbol} (${signal.tokenName})`);
         console.log(`[DeBot Scout] ─────────────────────────────────────────────────────────────────`);
         console.log(`[DeBot Scout] 📍 地址: ${tokenAddress}`);
         console.log(`[DeBot Scout] ⛓️  链: ${chain}`);
@@ -580,14 +589,7 @@ export class DebotPlaywrightScout extends EventEmitter {
         const tokenAddress = token.address;
         if (!tokenAddress) return;
         
-        // 检查是否重复 (30分钟内)
-        const cacheKey = `heatmap:${tokenAddress}`;
         const now = Date.now();
-        if (this.lastSeenTokens.has(cacheKey)) {
-            const lastSeen = this.lastSeenTokens.get(cacheKey);
-            if (now - lastSeen < 30 * 60 * 1000) return;
-        }
-        this.lastSeenTokens.set(cacheKey, now);
         
         // 检测链 - SOL 地址通常不以 0x 开头，使用大写
         const chain = tokenAddress.startsWith('0x') ? 'BSC' : 'SOL';
@@ -651,12 +653,26 @@ export class DebotPlaywrightScout extends EventEmitter {
             timestamp: now,
             raw: token
         };
-        
+
+        // UI 对齐：同币聚合成卡片，变化才计数+1（并记录本次价格）
+        const sig = [
+            signal.signalCount,
+            Number(signal.price || 0).toFixed(12),
+            Number(signal.maxPrice || 0).toFixed(12),
+            Number(signal.maxPriceGain || 0).toFixed(4),
+            Math.round(Number(signal.marketCap || 0)),
+            Math.round(Number(signal.liquidity || 0)),
+            Math.round(Number(signal.volume || 0))
+        ].join('|');
+        const state = this.updateCardState(`heatmap:${tokenAddress}`, sig);
+        if (!state.changed) return;
+        signal.alertCount = state.count;
+
         // 打印完整信号信息 (让后台可见)
         const levelEmoji = signal.tokenLevel === 'gold' ? '🥇' : 
                           signal.tokenLevel === 'silver' ? '🥈' : '🥉';
         console.log(`\n[DeBot Scout] ═══════════════════════════════════════════════════════════════`);
-        console.log(`[DeBot Scout] ${levelEmoji} AI SIGNAL: ${tokenAddress}`);
+        console.log(`[DeBot Scout] ${levelEmoji} AI SIGNAL #${signal.alertCount}: ${tokenAddress}`);
         console.log(`[DeBot Scout] ─────────────────────────────────────────────────────────────────`);
         console.log(`[DeBot Scout] ⛓️  链: ${chain}`);
         console.log(`[DeBot Scout] 🏷️  等级: ${signal.tokenLevel}`);
@@ -726,13 +742,7 @@ export class DebotPlaywrightScout extends EventEmitter {
             return;
         }
         
-        // 检查是否重复 (30分钟内)
-        const cacheKey = `list:${tokenAddress}`;
-        if (this.lastSeenTokens.has(cacheKey)) {
-            const lastSeen = this.lastSeenTokens.get(cacheKey);
-            if (Date.now() - lastSeen < 30 * 60 * 1000) return;
-        }
-        this.lastSeenTokens.set(cacheKey, Date.now());
+        const now = Date.now();
         
         // 检测链 - 使用大写
         const chain = (item.chain || 'SOL').toUpperCase();
@@ -792,10 +802,24 @@ export class DebotPlaywrightScout extends EventEmitter {
             timestamp: Date.now(),
             raw: item
         };
-        
+
+        // UI 对齐：同币聚合成卡片，变化才计数+1（并记录本次价格）
+        const sig = [
+            signal.smartMoneyCount,
+            Number(signal.price || 0).toFixed(12),
+            Math.round(Number(signal.marketCap || 0)),
+            Math.round(Number(signal.liquidity || 0)),
+            Math.round(Number(signal.volume || 0)),
+            signal.signalCount,
+            signal.maxPriceGain
+        ].join('|');
+        const state = this.updateCardState(`list:${tokenAddress}`, sig);
+        if (!state.changed) return;
+        signal.alertCount = state.count;
+
         // 打印完整信息（不过滤，显示所有数据）
         console.log(`\n[DeBot Scout] ═══════════════════════════════════════════════════════════════`);
-        console.log(`[DeBot Scout] 🤖 LIST SIGNAL: ${signal.symbol}`);
+        console.log(`[DeBot Scout] 🤖 LIST SIGNAL #${signal.alertCount}: ${signal.symbol}`);
         console.log(`[DeBot Scout] ─────────────────────────────────────────────────────────────────`);
         console.log(`[DeBot Scout] 📍 地址: ${tokenAddress}`);
         console.log(`[DeBot Scout] ⛓️  链: ${normalizedChain}`);
@@ -851,6 +875,19 @@ export class DebotPlaywrightScout extends EventEmitter {
         this.emit('signal', signal);
     }
     
+    /**
+     * UI 对齐：按 token 聚合成“卡片”，只在关键信息变化时计数+1
+     */
+    updateCardState(key, signature) {
+        const prev = this.cardState.get(key);
+        if (prev?.signature === signature) {
+            return { changed: false, count: prev.count };
+        }
+        const count = (prev?.count || 0) + 1;
+        this.cardState.set(key, { count, signature, lastAt: Date.now() });
+        return { changed: true, count };
+    }
+
     /**
      * 检查是否是新信号
      */
@@ -933,7 +970,8 @@ export class DebotPlaywrightScout extends EventEmitter {
         return {
             isRunning: this.isRunning,
             hasSession: this.hasSession(),
-            cachedTokens: this.lastSeenTokens.size
+            cachedTokens: this.lastSeenTokens.size,
+            cardStates: this.cardState.size
         };
     }
 }
