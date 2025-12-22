@@ -149,25 +149,27 @@ export class GMGNPlaywrightScout extends EventEmitter {
         this.page.on('response', async (response) => {
             const url = response.url();
             
-            // 只处理 GMGN API 请求
-            if (!url.includes('gmgn.ai')) return;
+            // 捕获所有 GMGN 相关请求
+            if (!url.includes('gmgn')) return;
             
-            // 调试：打印所有 GMGN 请求
-            if (url.includes('/defi/') || url.includes('/api/')) {
-                console.log(`[GMGN Scout] 📡 捕获请求: ${url.split('?')[0].split('/').slice(-2).join('/')}`);
-            }
+            // 调试：打印所有请求 URL
+            const shortUrl = url.split('?')[0].split('/').slice(-3).join('/');
+            console.log(`[GMGN Scout] 📡 请求: ${shortUrl}`);
             
             try {
                 const contentType = response.headers()['content-type'] || '';
-                if (!contentType.includes('application/json')) return;
+                if (!contentType.includes('json')) return;
                 
                 const data = await response.json();
                 
-                // 检测数据类型并处理
-                if (url.includes('signal') || url.includes('rank')) {
-                    // 通用处理：尝试从各种格式中提取数据
-                    this.handleGenericData(url, data);
+                // 打印数据结构用于调试
+                if (data?.data) {
+                    const keys = Object.keys(data.data);
+                    console.log(`[GMGN Scout] 📊 数据结构: ${keys.slice(0, 5).join(', ')}`);
                 }
+                
+                // 处理所有可能包含代币数据的响应
+                this.handleGenericData(url, data);
                 
             } catch (error) {
                 // 忽略解析错误
