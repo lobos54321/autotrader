@@ -368,13 +368,32 @@ class SentimentArbitrageSystem {
         } else {
           await this.debotScout.start();
           this.debotScout.on('signal', (signal) => {
-            const action = signal.action === 'buy' ? '买入' : '卖出';
-            console.log(`\n${signal.emoji} [DeBot] 聪明钱${action}: ${signal.symbol} (${signal.chain})`);
+            // 根据信号类型显示不同的动作
+            const typeLabel = signal.type === 'HOT_TOKEN' ? '热门代币' :
+                              signal.type === 'AI_SIGNAL' ? 'AI信号' :
+                              signal.action === 'buy' ? '聪明钱买入' : '聪明钱观察';
+            const emoji = signal.emoji || (signal.tokenTier === 'gold' ? '🥇' : 
+                          signal.tokenTier === 'silver' ? '🥈' : '🔥');
+            
+            // 详细日志
+            console.log(`\n${emoji} [DeBot] ${typeLabel}: ${signal.symbol || signal.tokenAddress?.slice(0,8)} (${signal.chain})`);
+            if (signal.smart_wallet_online !== undefined) {
+              console.log(`   🐋 聪明钱: ${signal.smart_wallet_online}/${signal.smart_wallet_total}`);
+            }
+            if (signal.marketCap) {
+              console.log(`   💰 市值: $${(signal.marketCap/1000).toFixed(1)}K | 流动性: $${((signal.liquidity || 0)/1000).toFixed(1)}K`);
+            }
+            if (signal.aiScore) {
+              console.log(`   🤖 AI评分: ${signal.aiScore}/10`);
+            }
+            
+            // 注入信号到处理流程
             this.injectSignal(signal);
           });
           console.log('   ✅ DeBot Scout active');
-          console.log('      - 🟢 Smart Money Buy (聪明钱买入)');
-          console.log('      - 🔴 Smart Money Sell (聪明钱卖出)\n');
+          console.log('      - 🔥 Hot Tokens (热门代币)');
+          console.log('      - 🤖 AI Signals (AI信号)');
+          console.log('      - 🐋 Smart Money (聪明钱追踪)\n');
         }
       }
 

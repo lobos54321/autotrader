@@ -325,15 +325,28 @@ export class DebotPlaywrightScout extends EventEmitter {
             raw: token
         };
         
-        // 打印信号信息
+        // 打印完整信号信息 (让后台可见)
         const tierEmoji = signal.tokenTier === 'gold' ? '🥇' : 
                          signal.tokenTier === 'silver' ? '🥈' : '🔥';
-        console.log(`[DeBot Scout] ${tierEmoji} Rank代币: ${signal.symbol} (${tokenAddress.slice(0, 8)}...)`);
-        console.log(`   🐋 聪明钱: ${signal.smart_wallet_online}在线/${signal.smart_wallet_total}总数`);
-        console.log(`   📊 市值: $${(signal.marketCap/1000).toFixed(1)}K, 流动性: $${(signal.liquidity/1000).toFixed(1)}K`);
+        console.log(`\n[DeBot Scout] ═══════════════════════════════════════════`);
+        console.log(`[DeBot Scout] ${tierEmoji} Rank代币: ${signal.symbol} (${tokenAddress})`);
+        console.log(`[DeBot Scout] ─────────────────────────────────────────────`);
+        console.log(`[DeBot Scout] 🐋 聪明钱: ${signal.smart_wallet_online}在线 / ${signal.smart_wallet_total}总数`);
+        console.log(`[DeBot Scout] 💰 市值: $${(signal.marketCap/1000).toFixed(1)}K | 流动性: $${(signal.liquidity/1000).toFixed(1)}K`);
+        console.log(`[DeBot Scout] 📈 价格变化: 5m ${(signal.priceChange5m*100).toFixed(1)}% | 1h ${(signal.priceChange1h*100).toFixed(1)}% | 24h ${(signal.priceChange24h*100).toFixed(1)}%`);
+        console.log(`[DeBot Scout] 👥 持有人: ${signal.holders} | 买卖: ${signal.buys}/${signal.sells}`);
+        console.log(`[DeBot Scout] 🏷️ 等级: ${signal.tokenTier || 'bronze'} | 活跃分: ${(signal.activityScore*100).toFixed(0)}%`);
+        console.log(`[DeBot Scout] 🔒 权限: ${signal.isMintAbandoned ? '已丢弃✅' : '未丢弃⚠️'}`);
+        if (signal.twitter) console.log(`[DeBot Scout] 🐦 Twitter: ${signal.twitter}`);
+        if (signal.description) console.log(`[DeBot Scout] 📝 描述: ${signal.description.slice(0, 80)}...`);
         if (signal.aiScore) {
-            console.log(`   🤖 AI评分: ${signal.aiScore}/10, 叙事: ${signal.aiNarrativeType || 'Unknown'}`);
+            console.log(`[DeBot Scout] ─────────────────────────────────────────────`);
+            console.log(`[DeBot Scout] 🤖 AI评分: ${signal.aiScore}/10`);
+            console.log(`[DeBot Scout] 📖 叙事类型: ${signal.aiNarrativeType || 'Unknown'}`);
+            if (signal.aiNarrative) console.log(`[DeBot Scout] 💡 叙事: ${signal.aiNarrative.slice(0, 100)}...`);
+            if (signal.hasNegativeIncidents) console.log(`[DeBot Scout] ⚠️ 警告: 存在负面事件`);
         }
+        console.log(`[DeBot Scout] ═══════════════════════════════════════════\n`);
         
         // 发送信号
         this.emit('signal', signal);
@@ -442,11 +455,19 @@ export class DebotPlaywrightScout extends EventEmitter {
             raw: token
         };
         
-        // 打印信号信息
+        // 打印完整信号信息 (让后台可见)
         const levelEmoji = signal.tokenLevel === 'gold' ? '🥇' : 
                           signal.tokenLevel === 'silver' ? '🥈' : '🥉';
-        console.log(`[DeBot Scout] ${levelEmoji} AI信号: ${tokenAddress.slice(0, 12)}...`);
-        console.log(`   📊 ${signal.signalCount}次信号, 最高涨幅 ${signal.maxPriceGain.toFixed(1)}x`);
+        console.log(`\n[DeBot Scout] ═══════════════════════════════════════════`);
+        console.log(`[DeBot Scout] ${levelEmoji} AI信号: ${tokenAddress}`);
+        console.log(`[DeBot Scout] ─────────────────────────────────────────────`);
+        console.log(`[DeBot Scout] 📊 信号次数: ${signal.signalCount}`);
+        console.log(`[DeBot Scout] 📈 最高涨幅: ${signal.maxPriceGain.toFixed(1)}x`);
+        console.log(`[DeBot Scout] 💵 首次价格: $${signal.firstPrice.toFixed(10)}`);
+        console.log(`[DeBot Scout] 💰 最高价格: $${signal.maxPrice.toFixed(10)}`);
+        console.log(`[DeBot Scout] 🏷️ 等级: ${signal.tokenLevel}`);
+        console.log(`[DeBot Scout] ⏰ 首次时间: ${new Date(signal.firstTime * 1000).toISOString()}`);
+        console.log(`[DeBot Scout] ═══════════════════════════════════════════\n`);
         
         // 发送所有信号，不做过滤
         this.emit('signal', signal);
