@@ -12,7 +12,7 @@
  */
 
 import { SmartMoneyTracker } from '../tracking/smart-money-tracker.js';
-import { HardGate } from '../gates/hard-gate.js';
+import { HardGateFilter } from '../gates/hard-gates.js';
 import axios from 'axios';
 
 // 尝试导入 DeBot Scout
