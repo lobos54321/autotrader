@@ -372,14 +372,39 @@ class DeBotScout extends EventEmitter {
                 signal.aiReport = this.parseAIReport(aiReport);
             }
             
-            console.log(`\n🎯 [DeBot Scout] 发现信号!`);
-            console.log(`   Token: ${signal.tokenAddress.slice(0, 8)}... (${signal.chain})`);
-            console.log(`   等级: ${signal.tokenLevel || 'N/A'}`);
-            console.log(`   信号次数: ${signal.signalCount}`);
-            console.log(`   最大涨幅: ${(signal.maxPriceGain || 0).toFixed(1)}x`);
-            if (signal.aiReport?.rating?.score) {
-                console.log(`   AI评分: ${signal.aiReport.rating.score}/10`);
+            // 详细日志输出 - 让用户能看到完整数据
+            console.log(`\n${'━'.repeat(60)}`);
+            console.log(`🎯 [DeBot Heatmap 信号] ${new Date().toLocaleTimeString()}`);
+            console.log(`${'━'.repeat(60)}`);
+            console.log(`📍 Token: ${signal.tokenAddress}`);
+            console.log(`⛓️  Chain: ${signal.chain}`);
+            console.log(`🏅 等级: ${signal.tokenLevel || 'unknown'}`);
+            console.log(`📊 信号次数: ${signal.signalCount}`);
+            console.log(`📈 最大涨幅: ${(signal.maxPriceGain || 0).toFixed(2)}x`);
+            console.log(`💰 首次价格: $${signal.firstPrice || 0}`);
+            console.log(`🔝 最高价格: $${signal.maxPrice || 0}`);
+            if (signal.firstTime) {
+                console.log(`⏰ 首次信号: ${signal.firstTime.toLocaleString()}`);
             }
+            if (signal.signalTags?.length) {
+                console.log(`🏷️  标签: ${signal.signalTags.join(', ')}`);
+            }
+            
+            // AI 报告详情
+            if (signal.aiReport) {
+                console.log(`\n📖 AI 叙事报告:`);
+                console.log(`   项目名: ${signal.aiReport.projectName || 'N/A'}`);
+                console.log(`   叙事类型: ${signal.aiReport.narrativeType || 'N/A'}`);
+                console.log(`   ⭐ AI评分: ${signal.aiReport.rating?.score || 0}/10`);
+                console.log(`   📝 评分理由: ${signal.aiReport.rating?.reason?.slice(0, 100) || 'N/A'}...`);
+                if (signal.aiReport.origin) {
+                    console.log(`   🌱 起源: ${signal.aiReport.origin.slice(0, 80)}...`);
+                }
+                if (signal.aiReport.distribution?.negativeIncidents) {
+                    console.log(`   ⚠️  负面事件: ${signal.aiReport.distribution.negativeIncidents.slice(0, 80)}`);
+                }
+            }
+            console.log(`${'━'.repeat(60)}\n`);
             
             // 发射信号事件
             this.emit('hunter-signal', signal);
@@ -411,6 +436,61 @@ class DeBotScout extends EventEmitter {
                     token.aiReport = this.parseAIReport(aiReport);
                 }
             }
+            
+            // 详细日志输出 - 让用户能看到完整数据
+            console.log(`\n${'═'.repeat(60)}`);
+            console.log(`🔥 [DeBot Activity Rank 热门代币] ${new Date().toLocaleTimeString()}`);
+            console.log(`${'═'.repeat(60)}`);
+            console.log(`📍 Token: ${token.tokenAddress}`);
+            console.log(`🏷️  名称: ${token.name} (${token.symbol})`);
+            console.log(`⛓️  Chain: ${token.chain}`);
+            console.log(`\n💰 市场数据:`);
+            console.log(`   价格: $${token.price?.toFixed(10) || 0}`);
+            console.log(`   市值: $${(token.marketCap || 0).toLocaleString()}`);
+            console.log(`   流动性: $${(token.liquidity || 0).toLocaleString()}`);
+            console.log(`   持有人: ${token.holders || 0}`);
+            console.log(`   24h交易量: $${(token.volume || 0).toLocaleString()}`);
+            console.log(`\n📈 涨跌幅:`);
+            console.log(`   5分钟: ${((token.change5m || 0) * 100).toFixed(2)}%`);
+            console.log(`   1小时: ${((token.change1h || 0) * 100).toFixed(2)}%`);
+            console.log(`   24小时: ${((token.change24h || 0) * 100).toFixed(2)}%`);
+            console.log(`\n🧠 聪明钱数据:`);
+            console.log(`   在线聪明钱: ${token.smartWalletOnline}`);
+            console.log(`   总聪明钱: ${token.smartWalletTotal}`);
+            console.log(`   最大涨幅: ${(token.maxPriceGain || 0).toFixed(2)}x`);
+            console.log(`   代币等级: ${token.tokenTier || 'N/A'}`);
+            console.log(`   活跃度: ${(token.activityScore || 0).toFixed(4)}`);
+            console.log(`\n📊 交易数据:`);
+            console.log(`   买入: ${token.buys} | 卖出: ${token.sells} | 总交易: ${token.swaps}`);
+            console.log(`\n🔒 安全信息:`);
+            console.log(`   Mint权限已丢弃: ${token.isMintAbandoned ? '✅ 是' : '❌ 否'}`);
+            if (token.tags?.length) {
+                console.log(`   标签: ${token.tags.join(', ')}`);
+            }
+            if (token.twitter || token.website) {
+                console.log(`\n🌐 社交信息:`);
+                if (token.twitter) console.log(`   Twitter: ${token.twitter}`);
+                if (token.website) console.log(`   Website: ${token.website}`);
+            }
+            if (token.description) {
+                console.log(`   描述: ${token.description.slice(0, 100)}...`);
+            }
+            
+            // AI 报告详情
+            if (token.aiReport) {
+                console.log(`\n📖 AI 叙事报告:`);
+                console.log(`   项目名: ${token.aiReport.projectName || 'N/A'}`);
+                console.log(`   叙事类型: ${token.aiReport.narrativeType || 'N/A'}`);
+                console.log(`   ⭐ AI评分: ${token.aiReport.rating?.score || 0}/10`);
+                console.log(`   📝 评分理由: ${token.aiReport.rating?.reason?.slice(0, 100) || 'N/A'}...`);
+                if (token.aiReport.distribution?.celebritySupport) {
+                    console.log(`   👑 名人背书: ${token.aiReport.distribution.celebritySupport.slice(0, 80)}`);
+                }
+                if (token.aiReport.distribution?.negativeIncidents) {
+                    console.log(`   ⚠️  负面事件: ${token.aiReport.distribution.negativeIncidents.slice(0, 80)}`);
+                }
+            }
+            console.log(`${'═'.repeat(60)}\n`);
             
             // 发射热门代币事件
             this.emit('hot-token', token);
