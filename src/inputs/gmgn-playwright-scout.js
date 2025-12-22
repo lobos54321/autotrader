@@ -104,15 +104,28 @@ export class GMGNPlaywrightScout extends EventEmitter {
             // 设置网络拦截
             this.setupNetworkInterceptor();
             
-            // 访问 GMGN Signal 页面 (这个页面有实时推送)
-            console.log('[GMGN Scout] 正在加载 GMGN Signal 页面...');
-            await this.page.goto('https://gmgn.ai/signal?chain=sol', {
+            // 访问 GMGN 战壕页面 (主页，有实时信号)
+            console.log('[GMGN Scout] 正在加载 GMGN 战壕页面...');
+            await this.page.goto('https://gmgn.ai/?chain=sol', {
                 waitUntil: 'load',
                 timeout: 60000
             });
             
             // 等待页面完全加载
             await this.page.waitForTimeout(5000);
+            
+            // 尝试点击"信号"按钮
+            try {
+                console.log('[GMGN Scout] 尝试打开信号面板...');
+                const signalBtn = await this.page.$('text=信号') || await this.page.$('text=Signal');
+                if (signalBtn) {
+                    await signalBtn.click();
+                    await this.page.waitForTimeout(2000);
+                    console.log('[GMGN Scout] ✅ 信号面板已打开');
+                }
+            } catch (e) {
+                console.log('[GMGN Scout] 信号按钮未找到，继续监听页面数据');
+            }
             
             console.log('[GMGN Scout] ✅ 页面加载完成');
             console.log('[GMGN Scout] ✅ 正在监听实时信号...');
@@ -321,21 +334,33 @@ export class GMGNPlaywrightScout extends EventEmitter {
     }
     
     /**
-     * 定时刷新页面 (保持会话活跃)
+     * 定时刷新页面 (轮换不同页面获取更多数据)
      */
     scheduleRefresh() {
         if (!this.isRunning) return;
         
-        // 较长间隔 (60-90秒)，因为 signal 页面有实时推送
-        const interval = 60000 + Math.random() * 30000;
+        // 45-75秒间隔
+        const interval = 45000 + Math.random() * 30000;
         
         this.refreshTimer = setTimeout(async () => {
             if (!this.isRunning) return;
             
             try {
-                // 只刷新当前 signal 页面保持会话活跃
-                console.log(`[GMGN Scout] 🔄 保持会话活跃...`);
-                await this.page.reload({ 
+                // 轮换不同页面
+                const pages = [
+                    'https://gmgn.ai/?chain=sol',                           // SOL 战壕
+                    'https://gmgn.ai/trend/ZAxgSuiP?chain=sol&tab=surge',   // SOL 飙升
+                    'https://gmgn.ai/trend/ZAxgSuiP?chain=sol&tab=new_pair', // SOL 新币
+                    'https://gmgn.ai/?chain=bsc',                           // BSC 战壕
+                    'https://gmgn.ai/trend/ZAxgSuiP?chain=bsc&tab=surge',   // BSC 飙升
+                ];
+                const randomPage = pages[Math.floor(Math.random() * pages.length)];
+                const pageName = randomPage.includes('bsc') ? 'BSC' : 'SOL';
+                const pageType = randomPage.includes('surge') ? '飙升' : 
+                                 randomPage.includes('new_pair') ? '新币' : '战壕';
+                
+                console.log(`[GMGN Scout] 🔄 切换到 ${pageName} ${pageType}`);
+                await this.page.goto(randomPage, { 
                     waitUntil: 'load',
                     timeout: 60000
                 });
