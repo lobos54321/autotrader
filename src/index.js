@@ -34,6 +34,7 @@ import { startDashboardServer } from './web/dashboard-server.js';
 import { RiskManager } from './risk/risk-manager.js';
 import { SmartMoneyTracker } from './tracking/smart-money-tracker.js';
 import { SmartMoneyScout } from './execution/smart-money-scout.js';
+import { GMGNSmartMoneyScout } from './inputs/gmgn-smart-money.js';
 
 dotenv.config();
 
@@ -72,6 +73,13 @@ class SentimentArbitrageSystem {
       this.executor,
       this.db
     );
+    
+    // GMGN Smart Money Scout - 替代 DeBot（无需 Cookie）
+    this.gmgnScout = new GMGNSmartMoneyScout({
+      chains: ['sol', 'bsc'],
+      pollInterval: 60000,  // 1分钟轮询
+      minSmartBuyers: 2     // 最少2个聪明钱买家触发
+    });
     
     // Shadow Price Tracker - track prices in shadow mode for source evaluation
     this.shadowTracker = new ShadowPriceTracker(
@@ -290,11 +298,22 @@ class SentimentArbitrageSystem {
       await this.positionMonitor.start();
       console.log('   ✅ Position monitor active\n');
 
-      // 2.5 Start Scout Engine (引擎 A - 聪明钱触发)
-      if (this.config.SCOUT_ENABLED !== 'false') {
-        console.log('🔭 Starting Smart Money Scout (引擎 A)...');
+      // 2.5 Start GMGN Smart Money Scout (替代 DeBot - 无需 Cookie)
+      console.log('🐋 Starting GMGN Smart Money Scout...');
+      await this.gmgnScout.start();
+      // 监听 GMGN 聪明钱信号
+      this.gmgnScout.on('signal', (signal) => {
+        console.log(`\n🐋 [GMGN] 聪明钱信号: ${signal.symbol} (${signal.chain}) - ${signal.smart_money_count} 个聪明钱`);
+        // 将信号写入数据库，由主循环处理
+        this.injectSignal(signal);
+      });
+      console.log('   ✅ GMGN Smart Money Scout active (无需 Cookie!)\n');
+
+      // 2.6 Start Scout Engine (引擎 A - 聪明钱触发) - 可选
+      if (process.env.SCOUT_ENABLED === 'true') {
+        console.log('🔭 Starting Legacy Smart Money Scout...');
         await this.smartMoneyScout.start();
-        console.log('   ✅ Scout engine active\n');
+        console.log('   ✅ Legacy Scout engine active\n');
       }
 
       // 3. Start signal processing loop
@@ -945,6 +964,49 @@ class SentimentArbitrageSystem {
   }
 
   /**
+   * Inject GMGN smart money signal into database for processing
+   */
+  injectSignal(signal) {
+    try {
+      // 检查是否已存在（30分钟内）
+      const existing = this.db.prepare(`
+        SELECT id FROM telegram_signals 
+        WHERE token_ca = ? AND chain = ? 
+        AND created_at > ?
+      `).get(
+        signal.token_ca, 
+        signal.chain,
+        Math.floor(Date.now() / 1000) - 1800
+      );
+      
+      if (existing) {
+        return; // 已存在，跳过
+      }
+      
+      // 插入新信号
+      this.db.prepare(`
+        INSERT INTO telegram_signals (
+          token_ca, chain, channel_name, channel_username,
+          message_text, timestamp, created_at, processed
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 0)
+      `).run(
+        signal.token_ca,
+        signal.chain,
+        `GMGN_SmartMoney_${signal.smart_money_count}`,
+        '@gmgn_smart_money',
+        `🐋 Smart Money Signal: ${signal.symbol} - ${signal.smart_money_count} smart buyers`,
+        new Date().toISOString(),
+        Math.floor(Date.now() / 1000)
+      );
+      
+      console.log(`   ✅ GMGN 信号已注入: ${signal.symbol}`);
+      
+    } catch (error) {
+      console.error('❌ Inject signal error:', error.message);
+    }
+  }
+
+  /**
    * Stop the system
    */
   async stop() {
@@ -958,6 +1020,7 @@ class SentimentArbitrageSystem {
 
     await this.telegramService.stop();
     this.positionMonitor.stop();
+    this.gmgnScout.stop();
 
     console.log('✅ System stopped\n');
     this.printStats();
