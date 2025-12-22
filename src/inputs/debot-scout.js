@@ -9,8 +9,8 @@
  * - activity_score: 活跃度评分
  */
 
-const axios = require('axios');
-const EventEmitter = require('events');
+import axios from 'axios';
+import { EventEmitter } from 'events';
 
 class DeBotScout extends EventEmitter {
     constructor() {
@@ -344,4 +344,5 @@ class DeBotScout extends EventEmitter {
 // 单例导出
 const debotScout = new DeBotScout();
 
-module.exports = debotScout;
+export default debotScout;
+export { DeBotScout };
