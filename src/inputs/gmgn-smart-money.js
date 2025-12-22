@@ -1,20 +1,18 @@
 /**
- * GMGN 多维信号源 - 全功能版
- * 
- * 通过 GMGN 免费 API 获取多种信号，无需 Cookie！
+ * GMGN 多维信号源 - 带自动 Cookie 刷新
  * 
  * 支持的信号类型:
  * 1. Smart Money (聪明钱) - 追踪聪明钱买入
  * 2. KOL Signals (KOL信号) - 追踪 KOL 持仓变化
  * 3. Trending/Surge (飙升榜) - 价格/成交量飙升预警
- * 4. DEX Paid (付费推广) - Dexscreener 付费信号
- * 5. AI Signals (AI信号) - GMGN AI 推荐
+ * 4. Hot (热门榜) - 交易最活跃代币
  * 
- * API 文档: https://github.com/imcrazysteven/GMGN-API
+ * 需要 Cookie（自动刷新或手动配置）
  */
 
 import axios from 'axios';
 import { EventEmitter } from 'events';
+import { GMGNCookieRefresher } from '../utils/gmgn-cookie-refresher.js';
 
 export class GMGNSmartMoneyScout extends EventEmitter {
     constructor(config = {}) {
@@ -24,7 +22,7 @@ export class GMGNSmartMoneyScout extends EventEmitter {
             baseUrl: 'https://gmgn.ai/defi/quotation/v1',
             
             // 轮询间隔（毫秒）
-            pollInterval: config.pollInterval || 30000, // 30秒
+            pollInterval: config.pollInterval || 60000, // 1分钟
             
             // 支持的链
             chains: config.chains || ['sol', 'bsc'],
@@ -33,47 +31,52 @@ export class GMGNSmartMoneyScout extends EventEmitter {
             enabledSignals: config.enabledSignals || {
                 smartMoney: true,    // 聪明钱
                 kol: true,           // KOL
-                trending: true,      // 飙升榜/Surge
-                dexPaid: true,       // DEX付费
-                aiSignal: true,      // AI信号
-                trenches: true,      // 战壕（新币聚合）
+                trending: true,      // 飙升榜
                 hot: true            // 热门榜
             },
             
-            // 聪明钱触发阈值
-            smartMoneyThreshold: {
-                minSmartBuyers: config.minSmartBuyers || 2,
-                minVolume24h: config.minVolume24h || 10000,
-                maxAge: config.maxAge || 24 * 60 * 60 * 1000
-            },
+            // 是否使用自动 Cookie 刷新
+            autoRefreshCookie: config.autoRefreshCookie !== false,
             
-            // 飙升榜阈值
-            surgeThreshold: {
-                priceChange5m: 20,   // 5分钟涨幅 > 20%
-                priceChange1h: 50,   // 1小时涨幅 > 50%
-                volumeIncrease: 3    // 成交量增加 3倍
-            },
+            // 手动 Cookie（如果不用自动刷新）
+            cookie: config.cookie || process.env.GMGN_COOKIE || '',
             
             // 安全过滤
             safetyFilters: ['not_honeypot'],
             
-            userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
+            userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         };
         
         this.isRunning = false;
         this.lastSeenTokens = new Map();
         this.pollTimers = {};
+        this.currentCookie = this.config.cookie;
+        this.cookieRefresher = null;
         
-        console.log('[GMGN] 🚀 多维信号源初始化完成 - 无需 Cookie！');
-        console.log(`[GMGN] 启用信号: ${Object.entries(this.config.enabledSignals).filter(([k,v]) => v).map(([k]) => k).join(', ')}`);
+        console.log('[GMGN] 多维信号源初始化');
     }
     
     getHeaders() {
-        return {
-            'accept': 'application/json',
+        const headers = {
+            'accept': 'application/json, text/plain, */*',
+            'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8',
             'user-agent': this.config.userAgent,
-            'referer': 'https://gmgn.ai/'
+            'origin': 'https://gmgn.ai',
+            'referer': 'https://gmgn.ai/',
+            'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+            'sec-ch-ua-mobile': '?0',
+            'sec-ch-ua-platform': '"macOS"',
+            'sec-fetch-dest': 'empty',
+            'sec-fetch-mode': 'cors',
+            'sec-fetch-site': 'same-origin'
         };
+        
+        // 添加 Cookie
+        if (this.currentCookie) {
+            headers['cookie'] = this.currentCookie;
+        }
+        
+        return headers;
     }
     
     // ==========================================
@@ -468,10 +471,44 @@ export class GMGNSmartMoneyScout extends EventEmitter {
         }
         
         this.isRunning = true;
-        console.log('[GMGN] 🚀 启动多维信号监控...');
+        console.log('[GMGN] 🚀 启动信号监控...');
         
-        // 立即执行一次
-        await this.pollOnce();
+        // 如果启用自动 Cookie 刷新
+        if (this.config.autoRefreshCookie && !this.currentCookie) {
+            console.log('[GMGN] 启动 Cookie 自动刷新...');
+            this.cookieRefresher = new GMGNCookieRefresher({
+                headless: process.env.NODE_ENV === 'production',
+                statePath: './data/gmgn-browser-state.json'
+            });
+            
+            // 监听 Cookie 更新
+            this.cookieRefresher.on('cookies', (cookie) => {
+                this.currentCookie = cookie;
+                console.log('[GMGN] Cookie 已更新');
+            });
+            
+            this.cookieRefresher.on('need_login', () => {
+                console.log('[GMGN] ⚠️ 需要登录 GMGN，请手动完成');
+            });
+            
+            try {
+                await this.cookieRefresher.start();
+            } catch (error) {
+                console.error('[GMGN] Cookie 刷新器启动失败:', error.message);
+                console.log('[GMGN] 将使用环境变量中的 Cookie');
+            }
+        }
+        
+        // 检查是否有 Cookie
+        if (!this.currentCookie) {
+            console.log('[GMGN] ⚠️ 没有 Cookie，API 可能被 Cloudflare 拦截');
+            console.log('[GMGN] 设置 GMGN_COOKIE 环境变量或启用自动刷新');
+        }
+        
+        // 延迟执行第一次扫描（等待 Cookie 就绪）
+        setTimeout(async () => {
+            await this.pollOnce();
+        }, 5000);
         
         // 设置定时轮询
         for (const chain of this.config.chains) {
@@ -487,13 +524,17 @@ export class GMGNSmartMoneyScout extends EventEmitter {
                     }
                     
                 } catch (error) {
-                    console.error(`[GMGN] ${chain} 轮询错误:`, error.message);
+                    if (error.response?.status === 403) {
+                        console.error(`[GMGN] ${chain} 403 - Cookie 可能已过期`);
+                    } else {
+                        console.error(`[GMGN] ${chain} 错误:`, error.message);
+                    }
                 }
                 
             }, this.config.pollInterval);
         }
         
-        console.log('[GMGN] ✅ 多维信号监控已启动');
+        console.log('[GMGN] ✅ 信号监控已启动');
     }
     
     async pollOnce() {
@@ -507,12 +548,16 @@ export class GMGNSmartMoneyScout extends EventEmitter {
                 }
                 
             } catch (error) {
-                console.error(`[GMGN] ${chain} 扫描错误:`, error.message);
+                if (error.response?.status === 403) {
+                    console.error(`[GMGN] ${chain} 403 - 需要有效 Cookie`);
+                } else {
+                    console.error(`[GMGN] ${chain} 扫描错误:`, error.message);
+                }
             }
         }
     }
     
-    stop() {
+    async stop() {
         this.isRunning = false;
         
         for (const chain of Object.keys(this.pollTimers)) {
@@ -522,7 +567,20 @@ export class GMGNSmartMoneyScout extends EventEmitter {
             }
         }
         
-        console.log('[GMGN] ⏹️ 多维信号监控已停止');
+        // 停止 Cookie 刷新器
+        if (this.cookieRefresher) {
+            await this.cookieRefresher.stop();
+        }
+        
+        console.log('[GMGN] ⏹️ 信号监控已停止');
+    }
+    
+    /**
+     * 手动更新 Cookie
+     */
+    updateCookie(cookie) {
+        this.currentCookie = cookie;
+        console.log('[GMGN] Cookie 已手动更新');
     }
     
     getStatus() {
@@ -531,6 +589,7 @@ export class GMGNSmartMoneyScout extends EventEmitter {
             chains: this.config.chains,
             enabledSignals: this.config.enabledSignals,
             pollInterval: this.config.pollInterval,
+            hasCookie: !!this.currentCookie,
             cachedTokens: this.lastSeenTokens.size
         };
     }

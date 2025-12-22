@@ -35,6 +35,7 @@ import { RiskManager } from './risk/risk-manager.js';
 import { SmartMoneyTracker } from './tracking/smart-money-tracker.js';
 import { SmartMoneyScout } from './execution/smart-money-scout.js';
 import { DexScreenerScout } from './inputs/dexscreener-scout.js';
+import { GMGNSmartMoneyScout } from './inputs/gmgn-smart-money.js';
 
 dotenv.config();
 
@@ -79,6 +80,14 @@ class SentimentArbitrageSystem {
       chains: ['solana', 'bsc'],
       pollInterval: 60000,  // 1分钟轮询
       minLiquidity: 10000   // 最低 $10k 流动性
+    });
+    
+    // GMGN Scout - 聪明钱/KOL 信号源（需要 Cookie 或自动刷新）
+    this.gmgnScout = new GMGNSmartMoneyScout({
+      chains: ['sol', 'bsc'],
+      pollInterval: 60000,
+      autoRefreshCookie: process.env.GMGN_AUTO_REFRESH === 'true',
+      cookie: process.env.GMGN_COOKIE || ''
     });
     
     // Shadow Price Tracker - track prices in shadow mode for source evaluation
@@ -299,23 +308,36 @@ class SentimentArbitrageSystem {
       console.log('   ✅ Position monitor active\n');
 
       // 2.5 Start DexScreener Scout (免费 API - 无需 Cookie!)
-      console.log('📊 Starting DexScreener Scout...');
-      await this.dexScreenerScout.start();
-      // 监听 DexScreener 信号
-      this.dexScreenerScout.on('signal', (signal) => {
-        const info = signal.signal_type === 'boost' ? 'DEX付费推广' :
-                     signal.signal_type === 'top_boost' ? '热门付费' :
-                     signal.signal_type === 'profile' ? '资料更新' : '';
-        console.log(`\n${signal.emoji} [DexScreener ${signal.signal_type.toUpperCase()}] ${signal.symbol} (${signal.chain}) - ${info} $${(signal.liquidity || 0).toFixed(0)} liq`);
-        // 将信号写入数据库，由主循环处理
-        this.injectSignal(signal);
-      });
-      console.log('   ✅ DexScreener Scout active (免费 API!)');
-      console.log('      - 💎 Boosts (付费推广)');
-      console.log('      - 🔥 Top Boosts (热门付费)');
-      console.log('      - 📋 Profiles (资料更新)\n');
+      if (process.env.DEXSCREENER_ENABLED === 'true') {
+        console.log('📊 Starting DexScreener Scout...');
+        await this.dexScreenerScout.start();
+        this.dexScreenerScout.on('signal', (signal) => {
+          console.log(`\n${signal.emoji} [DexScreener] ${signal.symbol} (${signal.chain})`);
+          this.injectSignal(signal);
+        });
+        console.log('   ✅ DexScreener Scout active\n');
+      }
 
-      // 2.6 Start Scout Engine (引擎 A - 聪明钱触发) - 可选
+      // 2.6 Start GMGN Scout (聪明钱/KOL - 需要 Cookie)
+      if (process.env.GMGN_ENABLED === 'true') {
+        console.log('🐋 Starting GMGN Smart Money Scout...');
+        await this.gmgnScout.start();
+        this.gmgnScout.on('signal', (signal) => {
+          const info = signal.signal_type === 'smart_money' ? `${signal.smart_money_count || 0} 个聪明钱` :
+                       signal.signal_type === 'kol' ? `${signal.kol_count || 0} 个KOL` :
+                       signal.signal_type === 'trending' ? `涨幅 ${(signal.price_change_5m || 0).toFixed(1)}%` :
+                       signal.signal_type === 'hot' ? '热门' : '';
+          console.log(`\n${signal.emoji} [GMGN ${signal.signal_type.toUpperCase()}] ${signal.symbol} (${signal.chain}) - ${info}`);
+          this.injectSignal(signal);
+        });
+        console.log('   ✅ GMGN Scout active');
+        console.log('      - 🐋 Smart Money (聪明钱)');
+        console.log('      - 👑 KOL (KOL持仓)');
+        console.log('      - 🚀 Trending (飙升榜)');
+        console.log('      - 🔥 Hot (热门榜)\n');
+      }
+
+      // 2.7 Start Legacy Scout Engine (可选)
       if (process.env.SCOUT_ENABLED === 'true') {
         console.log('🔭 Starting Legacy Smart Money Scout...');
         await this.smartMoneyScout.start();
