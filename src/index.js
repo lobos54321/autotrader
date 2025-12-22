@@ -35,7 +35,7 @@ import { RiskManager } from './risk/risk-manager.js';
 import { SmartMoneyTracker } from './tracking/smart-money-tracker.js';
 import { SmartMoneyScout } from './execution/smart-money-scout.js';
 import { DexScreenerScout } from './inputs/dexscreener-scout.js';
-import { GMGNSmartMoneyScout } from './inputs/gmgn-smart-money.js';
+import { GMGNPlaywrightScout } from './inputs/gmgn-playwright-scout.js';
 
 dotenv.config();
 
@@ -82,12 +82,10 @@ class SentimentArbitrageSystem {
       minLiquidity: 10000   // 最低 $10k 流动性
     });
     
-    // GMGN Scout - 聪明钱/KOL 信号源（需要 Cookie 或自动刷新）
-    this.gmgnScout = new GMGNSmartMoneyScout({
-      chains: ['sol', 'bsc'],
-      pollInterval: 60000,
-      autoRefreshCookie: process.env.GMGN_AUTO_REFRESH === 'true',
-      cookie: process.env.GMGN_COOKIE || ''
+    // GMGN Playwright Scout - 聪明钱/KOL 信号源（使用 Playwright 拦截）
+    this.gmgnScout = new GMGNPlaywrightScout({
+      chains: ['sol'],
+      headless: process.env.NODE_ENV === 'production'
     });
     
     // Shadow Price Tracker - track prices in shadow mode for source evaluation
@@ -318,23 +316,30 @@ class SentimentArbitrageSystem {
         console.log('   ✅ DexScreener Scout active\n');
       }
 
-      // 2.6 Start GMGN Scout (聪明钱/KOL - 需要 Cookie)
+      // 2.6 Start GMGN Playwright Scout (聪明钱/KOL - Playwright 模式)
       if (process.env.GMGN_ENABLED === 'true') {
-        console.log('🐋 Starting GMGN Smart Money Scout...');
-        await this.gmgnScout.start();
-        this.gmgnScout.on('signal', (signal) => {
-          const info = signal.signal_type === 'smart_money' ? `${signal.smart_money_count || 0} 个聪明钱` :
-                       signal.signal_type === 'kol' ? `${signal.kol_count || 0} 个KOL` :
-                       signal.signal_type === 'trending' ? `涨幅 ${(signal.price_change_5m || 0).toFixed(1)}%` :
-                       signal.signal_type === 'hot' ? '热门' : '';
-          console.log(`\n${signal.emoji} [GMGN ${signal.signal_type.toUpperCase()}] ${signal.symbol} (${signal.chain}) - ${info}`);
-          this.injectSignal(signal);
-        });
-        console.log('   ✅ GMGN Scout active');
-        console.log('      - 🐋 Smart Money (聪明钱)');
-        console.log('      - 👑 KOL (KOL持仓)');
-        console.log('      - 🚀 Trending (飙升榜)');
-        console.log('      - 🔥 Hot (热门榜)\n');
+        console.log('🐋 Starting GMGN Playwright Scout...');
+        
+        if (!this.gmgnScout.hasSession()) {
+          console.log('   ⚠️ 未找到 GMGN Session!');
+          console.log('   请先运行: node scripts/gmgn-login-setup.js');
+          console.log('   跳过 GMGN Scout\n');
+        } else {
+          await this.gmgnScout.start();
+          this.gmgnScout.on('signal', (signal) => {
+            const info = signal.signal_type === 'smart_money' ? `${signal.smart_money_count || 0} 个聪明钱` :
+                         signal.signal_type === 'kol' ? `${signal.kol_count || 0} 个KOL` :
+                         signal.signal_type === 'surge' ? `5m +${(signal.price_change_5m || 0).toFixed(1)}%` :
+                         signal.signal_type === 'signal' ? '新信号' : '';
+            console.log(`\n${signal.emoji} [GMGN ${signal.signal_type.toUpperCase()}] ${signal.symbol} (${signal.chain}) - ${info}`);
+            this.injectSignal(signal);
+          });
+          console.log('   ✅ GMGN Playwright Scout active');
+          console.log('      - 🐋 Smart Money (聪明钱)');
+          console.log('      - 👑 KOL (KOL持仓)');
+          console.log('      - 🚀 Surge (飙升榜)');
+          console.log('      - 📡 Signals (信号)\n');
+        }
       }
 
       // 2.7 Start Legacy Scout Engine (可选)
