@@ -300,27 +300,59 @@ export class GMGNPlaywrightScout extends EventEmitter {
      * 创建信号对象
      */
     createSignal(token, signalType, emoji) {
-        const tokenCA = token.address || token.token_address || token.ca;
+        const tokenCA = token.address || token.token_address || token.ca || token.contract;
         if (!tokenCA) return null;
+        
+        // 检测链 - 0x 开头是 BSC/ETH，否则是 SOL
+        let chain = 'SOL';
+        if (tokenCA.startsWith('0x')) {
+            chain = 'BSC';
+        } else if (token.chain) {
+            chain = token.chain.toUpperCase();
+            if (chain === 'SOLANA') chain = 'SOL';
+        }
         
         return {
             token_ca: tokenCA,
-            chain: 'SOL',  // GMGN 主要是 SOL
+            chain: chain,
             symbol: token.symbol || 'Unknown',
             name: token.name || token.symbol || 'Unknown',
             signal_type: signalType,
             emoji: emoji,
-            smart_money_count: token.smart_money_count || token.smartmoney || 0,
-            kol_count: token.kol_count || 0,
+            
+            // 聪明钱/KOL 数据 (截图中的 "聪明钱/KOL" 列)
+            smart_money_count: token.smart_money_count || token.smartmoney || token.smart_count || 0,
+            kol_count: token.kol_count || token.kol || 0,
+            
+            // 市值相关 (截图中的 "市值" 和 "历史最高市值")
+            market_cap: token.market_cap || token.marketcap || token.mc || 0,
+            ath_market_cap: token.ath_market_cap || token.ath_mc || 0,
+            
+            // 流动性 (截图中的 "池子")
+            liquidity: token.liquidity || token.pool || token.lp || 0,
+            
+            // 交易数据 (截图中的 "1h成交额" 和 "1h交易数")
+            volume_1h: token.volume_1h || token.swaps_1h_amount || 0,
             volume_24h: token.volume_24h || token.volume || 0,
+            tx_count_1h: token.tx_count_1h || token.swaps_1h || 0,
+            buy_count_1h: token.buy_count_1h || token.buys_1h || 0,
+            sell_count_1h: token.sell_count_1h || token.sells_1h || 0,
+            
+            // 持有者 (截图中的 "持有者")
+            holder_count: token.holder_count || token.holders || 0,
+            
+            // 价格变化
             price: token.price || 0,
             price_change_5m: token.price_change_5m || token.change_5m || 0,
             price_change_1h: token.price_change_1h || token.change_1h || 0,
-            liquidity: token.liquidity || 0,
-            market_cap: token.market_cap || 0,
-            holder_count: token.holder_count || 0,
+            price_change_24h: token.price_change_24h || token.change_24h || 0,
+            
+            // 代币年龄 (截图中的 "123d", "325d")
+            age_days: token.age || token.created_days || 0,
+            
             source: `gmgn_playwright_${signalType}`,
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            raw: token
         };
     }
     
@@ -355,18 +387,22 @@ export class GMGNPlaywrightScout extends EventEmitter {
             if (!this.isRunning) return;
             
             try {
-                // 轮换不同页面
+                // 轮换不同页面 (包含热门榜)
                 const pages = [
-                    'https://gmgn.ai/?chain=sol',                           // SOL 战壕
-                    'https://gmgn.ai/trend/ZAxgSuiP?chain=sol&tab=surge',   // SOL 飙升
-                    'https://gmgn.ai/trend/ZAxgSuiP?chain=sol&tab=new_pair', // SOL 新币
-                    'https://gmgn.ai/?chain=bsc',                           // BSC 战壕
-                    'https://gmgn.ai/trend/ZAxgSuiP?chain=bsc&tab=surge',   // BSC 飙升
+                    'https://gmgn.ai/?chain=sol',                                    // SOL 战壕
+                    'https://gmgn.ai/trend/ZAxgSuiP?chain=sol',                       // SOL 热门
+                    'https://gmgn.ai/trend/ZAxgSuiP?chain=sol&tab=surge',             // SOL 飙升
+                    'https://gmgn.ai/trend/ZAxgSuiP?chain=sol&tab=new_pair',          // SOL 新币
+                    'https://gmgn.ai/?chain=bsc',                                     // BSC 战壕
+                    'https://gmgn.ai/trend/ZAxgSuiP?chain=bsc',                        // BSC 热门
+                    'https://gmgn.ai/trend/ZAxgSuiP?chain=bsc&tab=surge',             // BSC 飙升
+                    'https://gmgn.ai/trend/ZAxgSuiP?chain=bsc&tab=new_pair',          // BSC 新币
                 ];
                 const randomPage = pages[Math.floor(Math.random() * pages.length)];
                 const pageName = randomPage.includes('bsc') ? 'BSC' : 'SOL';
                 const pageType = randomPage.includes('surge') ? '飙升' : 
-                                 randomPage.includes('new_pair') ? '新币' : '战壕';
+                                 randomPage.includes('new_pair') ? '新币' :
+                                 randomPage.includes('trend') ? '热门' : '战壕';
                 
                 console.log(`[GMGN Scout] 🔄 切换到 ${pageName} ${pageType}`);
                 await this.page.goto(randomPage, { 
