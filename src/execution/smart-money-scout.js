@@ -15,6 +15,14 @@ import { SmartMoneyTracker } from '../tracking/smart-money-tracker.js';
 import { HardGate } from '../gates/hard-gate.js';
 import axios from 'axios';
 
+// 尝试导入 DeBot Scout
+let debotScout = null;
+try {
+  debotScout = (await import('../inputs/debot-scout.js')).default;
+} catch (e) {
+  console.log('⚠️ DeBot Scout not available, using fallback mode');
+}
+
 // Scout 配置
 const SCOUT_CONFIG = {
   // 仓位配置
@@ -89,13 +97,58 @@ export class SmartMoneyScout {
     this.isRunning = true;
     console.log('🚀 Smart Money Scout started');
     
-    // 方案 A: 使用 Helius WebSocket 实时监听
+    // 方案 A: 使用 DeBot API (推荐)
+    if (debotScout && process.env.DEBOT_COOKIE) {
+      this.startDeBotMode();
+    }
+    
+    // 方案 B: 使用 Helius WebSocket 实时监听
     if (this.heliusApiKey) {
       this.startHeliusWebSocket();
     }
     
-    // 方案 B: 轮询模式 (备用)
+    // 方案 C: 轮询模式 (备用)
     this.startPollingMode();
+  }
+
+  /**
+   * DeBot 模式 - 使用 DeBot API 获取聪明钱信号
+   */
+  startDeBotMode() {
+    console.log('🤖 Starting DeBot Scout mode...');
+    
+    // 监听 DeBot 的 hunter-signal 事件
+    debotScout.on('hunter-signal', async (signal) => {
+      console.log(`\n🎯 [DeBot] Hunter Signal: ${signal.tokenSymbol} (${signal.chain})`);
+      console.log(`   聪明钱: ${signal.smartMoney.online} online, ${signal.smartMoney.total} total`);
+      
+      // 转换为统一的 trade 格式
+      const trade = {
+        tokenCA: signal.tokenAddress,
+        chain: signal.chain,
+        wallet: 'DeBot_SmartMoney',
+        amountUSD: signal.market.volume24h || 10000,
+        action: 'buy',
+        timestamp: Date.now(),
+        source: 'DeBot',
+        
+        // DeBot 特有数据
+        debotData: {
+          smartMoneyOnline: signal.smartMoney.online,
+          smartMoneyTotal: signal.smartMoney.total,
+          activityScore: signal.activityScore,
+          security: signal.security,
+          tags: signal.tags
+        }
+      };
+      
+      // 执行 Scout 流程
+      await this.executeScoutTrade(trade);
+    });
+    
+    // 启动 DeBot Scout
+    debotScout.start();
+    console.log('   ✅ DeBot Scout active');
   }
 
   /**
