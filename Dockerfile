@@ -1,8 +1,28 @@
-# Use Node.js 20 LTS Alpine (更小更快)
-FROM node:20-alpine
+# Use Node.js 20 LTS with Debian for Playwright support
+FROM node:20-slim
 
-# Install only necessary dependencies for better-sqlite3
-RUN apk add --no-cache python3 make g++ 
+# Install dependencies for better-sqlite3 and Playwright
+RUN apt-get update && apt-get install -y \
+    python3 \
+    make \
+    g++ \
+    # Playwright dependencies
+    libnss3 \
+    libnspr4 \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libcups2 \
+    libdrm2 \
+    libxkbcommon0 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxfixes3 \
+    libxrandr2 \
+    libgbm1 \
+    libasound2 \
+    libpango-1.0-0 \
+    libcairo2 \
+    && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
 WORKDIR /app
@@ -12,6 +32,9 @@ COPY package*.json ./
 
 # Install dependencies
 RUN npm ci --only=production && npm cache clean --force
+
+# Install Playwright browsers
+RUN npx playwright install chromium --with-deps || true
 
 # Copy application code
 COPY . .
