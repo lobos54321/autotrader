@@ -137,7 +137,12 @@ export class GMGNPlaywrightScout extends EventEmitter {
             const url = response.url();
             
             // 只处理 GMGN API 请求
-            if (!url.includes('gmgn.ai/defi/quotation')) return;
+            if (!url.includes('gmgn.ai')) return;
+            
+            // 调试：打印所有 GMGN 请求
+            if (url.includes('/defi/') || url.includes('/api/')) {
+                console.log(`[GMGN Scout] 📡 捕获请求: ${url.split('?')[0].split('/').slice(-2).join('/')}`);
+            }
             
             try {
                 const contentType = response.headers()['content-type'] || '';
@@ -146,14 +151,9 @@ export class GMGNPlaywrightScout extends EventEmitter {
                 const data = await response.json();
                 
                 // 检测数据类型并处理
-                if (this.apiPatterns.smartMoney.test(url)) {
-                    this.handleSmartMoneyData(data);
-                } else if (this.apiPatterns.kol.test(url)) {
-                    this.handleKOLData(data);
-                } else if (this.apiPatterns.trending.test(url)) {
-                    this.handleTrendingData(data);
-                } else if (this.apiPatterns.signals.test(url)) {
-                    this.handleSignalData(data);
+                if (url.includes('signal') || url.includes('rank')) {
+                    // 通用处理：尝试从各种格式中提取数据
+                    this.handleGenericData(url, data);
                 }
                 
             } catch (error) {
@@ -163,17 +163,53 @@ export class GMGNPlaywrightScout extends EventEmitter {
     }
     
     /**
-     * 处理聪明钱数据
+     * 通用数据处理
      */
-    handleSmartMoneyData(data) {
-        if (!data?.data?.rank) return;
+    handleGenericData(url, data) {
+        // 尝试从不同格式中提取代币列表
+        let tokens = [];
         
-        const tokens = data.data.rank.slice(0, 10);
+        if (data?.data?.rank && Array.isArray(data.data.rank)) {
+            tokens = data.data.rank;
+        } else if (data?.data?.list && Array.isArray(data.data.list)) {
+            tokens = data.data.list;
+        } else if (data?.data && Array.isArray(data.data)) {
+            tokens = data.data;
+        } else if (Array.isArray(data)) {
+            tokens = data;
+        }
         
-        for (const token of tokens) {
-            const signal = this.createSignal(token, 'smart_money', '🐋');
+        if (tokens.length === 0) return;
+        
+        console.log(`[GMGN Scout] 📊 获取到 ${tokens.length} 个代币`);
+        
+        // 处理每个代币
+        for (const token of tokens.slice(0, 15)) {
+            // 判断信号类型
+            let signalType = 'signal';
+            let emoji = '📡';
+            
+            const smartMoney = token.smart_money_count || token.smartmoney || 0;
+            const kolCount = token.kol_count || 0;
+            const priceChange5m = parseFloat(token.price_change_5m || token.change_5m || 0);
+            
+            if (smartMoney >= 2) {
+                signalType = 'smart_money';
+                emoji = '🐋';
+            } else if (kolCount >= 1) {
+                signalType = 'kol';
+                emoji = '👑';
+            } else if (priceChange5m >= 20) {
+                signalType = 'surge';
+                emoji = '🚀';
+            }
+            
+            const signal = this.createSignal(token, signalType, emoji);
             if (signal && this.isNewSignal(signal)) {
-                console.log(`[GMGN Scout] 🐋 Smart Money: ${signal.symbol} - ${signal.smart_money_count} 个聪明钱`);
+                const info = signalType === 'smart_money' ? `${smartMoney} 个聪明钱` :
+                             signalType === 'kol' ? `${kolCount} 个KOL` :
+                             signalType === 'surge' ? `5m +${priceChange5m.toFixed(1)}%` : '';
+                console.log(`[GMGN Scout] ${emoji} ${signal.symbol} (${signal.chain}) - ${info}`);
                 this.emit('signal', signal);
             }
         }
