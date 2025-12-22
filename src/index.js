@@ -305,9 +305,11 @@ class SentimentArbitrageSystem {
       this.gmgnScout.on('signal', (signal) => {
         const info = signal.signal_type === 'smart_money' ? `${signal.smart_money_count} 个聪明钱` :
                      signal.signal_type === 'kol' ? `${signal.kol_count} 个KOL持仓` :
-                     signal.signal_type === 'surge' ? `5m涨幅 ${signal.price_change_5m}%` :
+                     signal.signal_type === 'surge' ? `5m涨幅 ${signal.price_change_5m?.toFixed(1)}%` :
                      signal.signal_type === 'dex_paid' ? 'DEX付费推广' :
-                     signal.signal_type === 'ai_signal' ? 'AI推荐' : '';
+                     signal.signal_type === 'ai_signal' ? 'AI推荐' :
+                     signal.signal_type === 'trenches' ? '新币信号' :
+                     signal.signal_type === 'hot' ? '热门代币' : '';
         console.log(`\n${signal.emoji} [GMGN ${signal.signal_type.toUpperCase()}] ${signal.symbol} (${signal.chain}) - ${info}`);
         // 将信号写入数据库，由主循环处理
         this.injectSignal(signal);
@@ -317,7 +319,9 @@ class SentimentArbitrageSystem {
       console.log('      - 👑 KOL Signals (KOL信号)');
       console.log('      - 🚀 Surge Alert (飙升榜)');
       console.log('      - 💎 DEX Paid (付费推广)');
-      console.log('      - 🤖 AI Signals (AI信号)\n');
+      console.log('      - 🤖 AI Signals (AI信号)');
+      console.log('      - ⚔️ Trenches (战壕/新币)');
+      console.log('      - 🔥 Hot (热门榜)\n');
 
       // 2.6 Start Scout Engine (引擎 A - 聪明钱触发) - 可选
       if (process.env.SCOUT_ENABLED === 'true') {

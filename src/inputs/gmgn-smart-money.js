@@ -33,9 +33,11 @@ export class GMGNSmartMoneyScout extends EventEmitter {
             enabledSignals: config.enabledSignals || {
                 smartMoney: true,    // 聪明钱
                 kol: true,           // KOL
-                trending: true,      // 飙升榜
+                trending: true,      // 飙升榜/Surge
                 dexPaid: true,       // DEX付费
-                aiSignal: true       // AI信号
+                aiSignal: true,      // AI信号
+                trenches: true,      // 战壕（新币聚合）
+                hot: true            // 热门榜
             },
             
             // 聪明钱触发阈值
@@ -238,7 +240,72 @@ export class GMGNSmartMoneyScout extends EventEmitter {
     }
     
     // ==========================================
-    // 6. 获取代币详情（增强版）
+    // 6. 战壕信号 (Trenches - 新币聚合信号)
+    // ==========================================
+    async getTrenchesTokens(chain = 'sol') {
+        try {
+            // 战壕 = 新币 + 多维度信号聚合
+            // 包含: 即将毕业、已迁移、热门新币等
+            const url = `${this.config.baseUrl}/rank/${chain}/swaps/1h`;
+            const response = await axios.get(url, {
+                headers: this.getHeaders(),
+                params: {
+                    orderby: 'open_timestamp',  // 按上线时间排序（新币优先）
+                    direction: 'desc',
+                    'filters[]': this.config.safetyFilters
+                },
+                timeout: 15000
+            });
+            
+            if (response.data?.data?.rank) {
+                // 过滤出24小时内的新币，且有一定交易量
+                const now = Date.now();
+                return response.data.data.rank.filter(t => {
+                    const openTime = t.open_timestamp ? t.open_timestamp * 1000 : 0;
+                    const age = now - openTime;
+                    const isNew = age < 24 * 60 * 60 * 1000; // 24小时内
+                    const hasVolume = (t.volume_24h || t.volume || 0) > 5000; // 成交量 > $5000
+                    const hasHolders = (t.holder_count || 0) > 50; // 持有人 > 50
+                    return isNew && hasVolume && hasHolders;
+                });
+            }
+            return [];
+        } catch (error) {
+            console.error(`[GMGN] 战壕API错误: ${error.message}`);
+            return [];
+        }
+    }
+    
+    // ==========================================
+    // 7. 热门榜 (Hot - 综合热度排行)
+    // ==========================================
+    async getHotTokens(chain = 'sol') {
+        try {
+            // 热门 = 交易量 + 持有人增长 + 社交热度
+            const url = `${this.config.baseUrl}/rank/${chain}/swaps/1h`;
+            const response = await axios.get(url, {
+                headers: this.getHeaders(),
+                params: {
+                    orderby: 'swaps',  // 按交易次数排序
+                    direction: 'desc',
+                    'filters[]': this.config.safetyFilters
+                },
+                timeout: 15000
+            });
+            
+            if (response.data?.data?.rank) {
+                // 取交易最活跃的前15个
+                return response.data.data.rank.slice(0, 15);
+            }
+            return [];
+        } catch (error) {
+            console.error(`[GMGN] 热门榜API错误: ${error.message}`);
+            return [];
+        }
+    }
+    
+    // ==========================================
+    // 8. 获取代币详情（增强版）
     // ==========================================
     async getTokenDetails(tokenCA, chain = 'sol') {
         try {
@@ -277,19 +344,21 @@ export class GMGNSmartMoneyScout extends EventEmitter {
     }
     
     // ==========================================
-    // 7. 综合扫描
+    // 9. 综合扫描
     // ==========================================
     async scanAll(chain = 'sol') {
         const signals = [];
         const { enabledSignals } = this.config;
         
         // 并行获取所有信号
-        const [smartMoney, kol, surge, dexPaid, ai] = await Promise.all([
+        const [smartMoney, kol, surge, dexPaid, ai, trenches, hot] = await Promise.all([
             enabledSignals.smartMoney ? this.getSmartMoneyTokens(chain) : [],
             enabledSignals.kol ? this.getKOLSignals(chain) : [],
             enabledSignals.trending ? this.getSurgeTokens(chain) : [],
             enabledSignals.dexPaid ? this.getDexPaidTokens(chain) : [],
-            enabledSignals.aiSignal ? this.getAISignals(chain) : []
+            enabledSignals.aiSignal ? this.getAISignals(chain) : [],
+            enabledSignals.trenches ? this.getTrenchesTokens(chain) : [],
+            enabledSignals.hot ? this.getHotTokens(chain) : []
         ]);
         
         // 处理聪明钱信号
@@ -327,6 +396,22 @@ export class GMGNSmartMoneyScout extends EventEmitter {
         // 处理 AI 信号
         for (const token of ai.slice(0, 5)) {
             const signal = this.createSignal(token, chain, 'ai_signal', '🤖');
+            if (signal && this.isNewSignal(signal)) {
+                signals.push(signal);
+            }
+        }
+        
+        // 处理战壕信号 (新币聚合)
+        for (const token of trenches.slice(0, 5)) {
+            const signal = this.createSignal(token, chain, 'trenches', '⚔️');
+            if (signal && this.isNewSignal(signal)) {
+                signals.push(signal);
+            }
+        }
+        
+        // 处理热门信号
+        for (const token of hot.slice(0, 5)) {
+            const signal = this.createSignal(token, chain, 'hot', '🔥');
             if (signal && this.isNewSignal(signal)) {
                 signals.push(signal);
             }
