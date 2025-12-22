@@ -105,6 +105,19 @@ Return JSON:
     "geographic_spread": "single_region/multi_region/global"
   },
   
+  "narrative_score": {
+    "total": <0-100, overall narrative strength>,
+    "breakdown": {
+      "authenticity": <0-25, is the hype real or fake?>,
+      "kol_power": <0-25, real KOL involvement and their influence>,
+      "viral_potential": <0-25, organic spread and engagement quality>,
+      "timing": <0-25, is this early alpha or late fomo?>
+    },
+    "grade": "S/A/B/C/D/F",
+    "recommendation": "strong_buy/buy/hold/avoid/run",
+    "reasoning": "<1-2 sentence explanation of the score>"
+  },
+  
   "verified_token": true/false,
   "confidence": "high/medium/low",
   "risk_flags": ["list of concerns if any"],
