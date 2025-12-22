@@ -2,10 +2,10 @@
   "cookies": [
     {
       "name": "__cf_bm",
-      "value": "3rpy_a2hhKj8cVeF_FPAYi19.grG2aekD8Mcx.MZBTw-1766383250-1.0.1.1-4Ml.MaAtchYyzreWMhPLa7nujAyxMBDVYBWyy_iYvQ8YVupAPko4TkTRMpeHXVI9w.X9op.aB3EaVG7JlPftShL2tJcrxUR_fKzVihzh78o",
+      "value": "GIHSePnsO1ktLpna_jprzV142cpkbC5WRfY_YejgaQU-1766399085-1.0.1.1-vrIt1DmXGkZXB_hwssQC1QoMcyGJY3yXaToRak9cAPuORKMq9yknogVe9LxULLPel5phBQbMAAQYgTKsa6g56.kpulxf5WjNib6A8MfQAac",
       "domain": ".debot.ai",
       "path": "/",
-      "expires": 1766385050.523008,
+      "expires": 1766400885.114818,
       "httpOnly": true,
       "secure": true,
       "sameSite": "None"
@@ -22,72 +22,62 @@
     },
     {
       "name": "beegosessionID",
-      "value": "ba79850e98e624a4ddd0bb4daacbc393",
+      "value": "0b6cd5ba3111c84adca129d291a33acf",
       "domain": "debot.ai",
       "path": "/",
-      "expires": 1768975251.386056,
+      "expires": 1768991085.791973,
       "httpOnly": true,
       "secure": true,
       "sameSite": "None"
     },
     {
       "name": "_ga_7QSW3N3LVZ",
-      "value": "GS2.1.s1766383255$o1$g0$t1766383255$j60$l0$h0",
+      "value": "GS2.1.s1766399088$o1$g0$t1766399088$j60$l0$h0",
       "domain": ".debot.ai",
       "path": "/",
-      "expires": 1800943255.6775,
+      "expires": 1800959088.334023,
       "httpOnly": false,
       "secure": false,
       "sameSite": "Lax"
     },
     {
       "name": "_ga",
-      "value": "GA1.1.1247202981.1766383256",
+      "value": "GA1.1.1721102837.1766399088",
       "domain": ".debot.ai",
       "path": "/",
-      "expires": 1800943255.678296,
+      "expires": 1800959088.334818,
       "httpOnly": false,
       "secure": false,
       "sameSite": "Lax"
     },
     {
       "name": "_bl_uid",
-      "value": "F5mzgj35gesqq9zC0fht42IrIIIp",
+      "value": "2CmCejpnhOj0j7eR0s0RtF33zm5L",
       "domain": "debot.ai",
       "path": "/",
-      "expires": 1781935255.9104,
+      "expires": 1781951090.050006,
       "httpOnly": false,
       "secure": false,
       "sameSite": "Lax"
     },
     {
       "name": "MEIQIA_TRACK_ID",
-      "value": "37BjGKOc6QOSFEOs869mA3WsfzJ",
+      "value": "37CFMfIdO7oUIgqHa7unxAWfOa3",
       "domain": ".debot.ai",
       "path": "/",
-      "expires": 1800943261.181766,
+      "expires": 1800959099.703666,
       "httpOnly": false,
       "secure": false,
       "sameSite": "Lax"
     },
     {
       "name": "MEIQIA_VISIT_ID",
-      "value": "37BjGLNe8BWinAfjuLzjwwIOgHN",
+      "value": "37CFMf9VprvHZE8IyRZynPH7igP",
       "domain": ".debot.ai",
       "path": "/",
-      "expires": 1800943261.189156,
+      "expires": 1800959099.717287,
       "httpOnly": false,
       "secure": false,
-      "sameSite": "Lax"
-    },
-    {
-      "name": "third-party-auth-token",
-      "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJVSUQiOiIxNzI5MDAiLCJzb3VyY2UiOiJkZWJvdCIsImV4cCI6MTc2Njk4ODEyOCwiaWF0IjoxNzY2MzgzMzI4fQ.WfPZw8SJ1UbI1zCBHoQwTDb4iton4bV-_gPOk5AySWk",
-      "domain": "sleep.debot.ai",
-      "path": "/",
-      "expires": 1766469728.274814,
-      "httpOnly": true,
-      "secure": true,
       "sameSite": "Lax"
     }
   ],
@@ -97,71 +87,39 @@
       "localStorage": [
         {
           "name": "DeviceTokenResponse",
-          "value": "{\"username\":\"lobos54321@gmail.com\",\"name\":\"lobos54321@gmail.com\",\"inviteCode\":182900,\"customInviteCode\":\"\",\"vip\":\"free\",\"vipEndTimestamp\":-62135596800,\"wallet\":\"\",\"walletMonitorQuota\":35,\"tokenMonitorQuota\":46,\"twitterUserMonitorQuota\":0,\"timesPerHour\":2000,\"token\":\"172900-5e0956907e3c331f1d9e32141386c70c\",\"bindedWallets\":null,\"quote\":{\"walletCnt\":50,\"tokenCnt\":50,\"timesPerHour\":2000,\"twitterUserCnt\":2},\"device\":{\"deviceToken\":\"0258dde60a1c774ee0968d88de46daba60ae\",\"platform\":\"ios\",\"versionNumber\":\"com.debot-1.native\"},\"sub_token\":\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJVSUQiOjE3MjkwMH0.JMcQwvBXiC_FAUUFXmB-KsQ8DjFkptFrVxNsXer6pbc\",\"third_token\":\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJVSUQiOjE3MjkwMH0.Kac9fUdehwZTNWNr87j4azgNjginT-jYfmBAc8e2qso\",\"telegram_bot_id\":\"debot_watcher_1_bot\",\"is_channel_owner\":false,\"is_totp_open\":true}"
-        },
-        {
-          "name": "DeviceTokenRequest",
-          "value": "请求用户信息成功"
-        },
-        {
-          "name": "subToken",
-          "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJVSUQiOjE3MjkwMH0.JMcQwvBXiC_FAUUFXmB-KsQ8DjFkptFrVxNsXer6pbc"
-        },
-        {
-          "name": "dt-theme",
-          "value": "dark"
-        },
-        {
-          "name": "fast_buy_pay_wallet_bsc_global",
-          "value": "0x09C4Aa43D01436BA5E7459C67FF07845a8731A19"
-        },
-        {
-          "name": "clipboardPermission",
-          "value": "granted"
-        },
-        {
-          "name": "new_function_modal_open_28",
-          "value": "1766383265"
-        },
-        {
-          "name": "DeviceTokenResponseStart",
-          "value": "开始请求用户信息"
-        },
-        {
-          "name": "fast_buy_pay_wallets_bsc_global",
-          "value": "[\"0x09C4Aa43D01436BA5E7459C67FF07845a8731A19\"]"
+          "value": "null"
         },
         {
           "name": "soundsMap",
           "value": "{\"signal\":\"Coin.mp3\",\"message\":\"DingDong.mp3\",\"buy\":\"Bell.mp3\",\"sell\":\"Bell.mp3\",\"limitBuy\":\"Bell.mp3\",\"limitSell\":\"Bell.mp3\",\"stopLossSell\":\"Bell.mp3\",\"takeProfitSell\":\"Bell.mp3\",\"signalCopyBuy\":\"Bell.mp3\",\"memeNew\":\"\",\"memeCompleting\":\"\",\"memeCompleted\":\"\",\"twitter\":\"Sonumi.mp3\",\"track\":\"DingDong.mp3\"}"
         },
         {
-          "name": "token_remarks",
-          "value": "{}"
-        },
-        {
           "name": "_MEIQIA_LANGUAGE",
           "value": "cn"
+        },
+        {
+          "name": "dt-theme",
+          "value": "dark"
         },
         {
           "name": "clipboardPermissionAttempted",
           "value": "true"
         },
         {
-          "name": "fast_buy_pay_type_bsc_global",
-          "value": "telegram"
+          "name": "clipboardPermission",
+          "value": "granted"
         },
         {
           "name": "MEIQIA_VISIT_ID",
-          "value": "37BjGLNe8BWinAfjuLzjwwIOgHN"
+          "value": "37CFMf9VprvHZE8IyRZynPH7igP"
         },
         {
-          "name": "wallet_remarks",
-          "value": "{\"0x3047ba591932010a83302cdc39d24716ade39a35\":\"安全钱包\",\"HLozNxezoXXRsGB4E1iZtNzwczSNv5NVoi2MToRSsb74\":\"安全钱包\"}"
+          "name": "DeviceTokenResponseStart",
+          "value": "开始请求用户信息"
         },
         {
           "name": "MEIQIA_TRACK_ID",
-          "value": "37BjGKOc6QOSFEOs869mA3WsfzJ"
+          "value": "37CFMfIdO7oUIgqHa7unxAWfOa3"
         }
       ]
     }
