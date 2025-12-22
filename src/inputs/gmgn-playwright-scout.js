@@ -304,12 +304,15 @@ export class GMGNPlaywrightScout extends EventEmitter {
                 
                 console.log(`[GMGN Scout] 🔄 刷新: ${randomPage.split('/').pop()}`);
                 await this.page.goto(randomPage, { 
-                    waitUntil: 'networkidle',
-                    timeout: 30000 
+                    waitUntil: 'load',  // 改用 load，不等待所有网络请求
+                    timeout: 60000      // 增加超时时间
                 });
                 
+                // 等待额外 3 秒让 API 请求完成
+                await this.page.waitForTimeout(3000);
+                
             } catch (error) {
-                console.error('[GMGN Scout] 刷新错误:', error.message);
+                console.error('[GMGN Scout] 刷新错误:', error.message.split('\n')[0]);
             }
             
             // 继续下一次刷新
