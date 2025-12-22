@@ -118,21 +118,28 @@ export class DebotPlaywrightScout extends EventEmitter {
             const url = response.url();
             
             // 只处理 DeBot API 请求
-            if (!url.includes('debot.ai') && !url.includes('debot')) return;
+            if (!url.includes('debot')) return;
             
-            // 调试：打印 API 请求
-            if (url.includes('/api/') || url.includes('smart') || url.includes('wallet')) {
-                console.log(`[DeBot Scout] 📡 捕获请求: ${url.split('?')[0].split('/').slice(-2).join('/')}`);
+            // 调试：打印所有 API 请求
+            const shortUrl = url.split('?')[0].split('/').slice(-2).join('/');
+            if (!url.includes('static') && !url.includes('.js') && !url.includes('.css')) {
+                console.log(`[DeBot Scout] 📡 捕获: ${shortUrl}`);
             }
             
             try {
                 const contentType = response.headers()['content-type'] || '';
-                if (!contentType.includes('application/json')) return;
+                if (!contentType.includes('json')) return;
                 
                 const data = await response.json();
                 
-                // 处理聪明钱数据
-                if (url.includes('smart') || url.includes('wallet') || url.includes('trade')) {
+                // 跳过钱包列表数据（只有 publicKey，没有代币地址）
+                if (url.includes('debot/wallets') || url.includes('debot/connect')) {
+                    return; // 这是钱包数据，不是代币交易
+                }
+                
+                // 处理代币交易数据
+                if (url.includes('trade') || url.includes('transaction') || 
+                    url.includes('activity') || url.includes('token')) {
                     this.handleSmartMoneyData(url, data);
                 }
                 

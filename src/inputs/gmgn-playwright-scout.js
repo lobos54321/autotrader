@@ -152,9 +152,16 @@ export class GMGNPlaywrightScout extends EventEmitter {
             // 捕获所有 GMGN 相关请求
             if (!url.includes('gmgn')) return;
             
-            // 调试：打印所有请求 URL
+            // 跳过静态资源
+            if (url.includes('/static/') || url.includes('.js') || 
+                url.includes('.css') || url.includes('.woff') ||
+                url.includes('google-analytics') || url.includes('cdn-cgi')) {
+                return;
+            }
+            
+            // 调试：打印 API 请求
             const shortUrl = url.split('?')[0].split('/').slice(-3).join('/');
-            console.log(`[GMGN Scout] 📡 请求: ${shortUrl}`);
+            console.log(`[GMGN Scout] 📡 API: ${shortUrl}`);
             
             try {
                 const contentType = response.headers()['content-type'] || '';
@@ -165,7 +172,7 @@ export class GMGNPlaywrightScout extends EventEmitter {
                 // 打印数据结构用于调试
                 if (data?.data) {
                     const keys = Object.keys(data.data);
-                    console.log(`[GMGN Scout] 📊 数据结构: ${keys.slice(0, 5).join(', ')}`);
+                    console.log(`[GMGN Scout] 📊 数据: ${keys.slice(0, 5).join(', ')}`);
                 }
                 
                 // 处理所有可能包含代币数据的响应
