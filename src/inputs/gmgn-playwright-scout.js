@@ -186,6 +186,31 @@ export class GMGNPlaywrightScout extends EventEmitter {
     
     /**
      * 通用数据处理
+     * 
+     * GMGN trendy API 返回格式:
+     * {
+     *   data: {
+     *     rank: [
+     *       {
+     *         address: "代币地址",
+     *         name: "代币名",
+     *         symbol: "SYMBOL",
+     *         smart_degen_count: 11,    // 🐋 聪明钱数量
+     *         renowned_count: 3,         // 👑 KOL 数量
+     *         sniper_count: 11,          // 狙击手数量
+     *         price_change_percent1h: 1426.59,
+     *         market_cap: 61099.7,
+     *         liquidity: 23636.2,
+     *         holder_count: 465,
+     *         top_10_holder_rate: 0.2244,
+     *         bundler_rate: 0.3876,      // Bundler 比例
+     *         is_honeypot: 0,
+     *         rug_ratio: 0.007,
+     *         ...
+     *       }
+     *     ]
+     *   }
+     * }
      */
     handleGenericData(url, data) {
         // 尝试从不同格式中提取代币列表
@@ -206,32 +231,70 @@ export class GMGNPlaywrightScout extends EventEmitter {
         console.log(`[GMGN Scout] 📊 获取到 ${tokens.length} 个代币`);
         
         // 处理每个代币
-        for (const token of tokens.slice(0, 15)) {
-            // 判断信号类型
-            let signalType = 'signal';
-            let emoji = '📡';
+        for (const token of tokens.slice(0, 20)) {
+            // 提取 GMGN 特有的关键数据
+            const smartDegenCount = token.smart_degen_count || 0;
+            const renownedCount = token.renowned_count || 0;
+            const priceChange1h = parseFloat(token.price_change_percent1h || token.price_change_percent || 0);
+            const sniperCount = token.sniper_count || 0;
             
-            const smartMoney = token.smart_money_count || token.smartmoney || 0;
-            const kolCount = token.kol_count || 0;
-            const priceChange5m = parseFloat(token.price_change_5m || token.change_5m || 0);
+            // 判断信号类型和优先级
+            let signalType = 'trending';
+            let emoji = '📈';
+            let priority = 0;
             
-            if (smartMoney >= 2) {
+            // 聪明钱信号 (最高优先)
+            if (smartDegenCount >= 5) {
+                signalType = 'smart_money';
+                emoji = '🐋🐋';
+                priority = 100;
+            } else if (smartDegenCount >= 2) {
                 signalType = 'smart_money';
                 emoji = '🐋';
-            } else if (kolCount >= 1) {
+                priority = 80;
+            }
+            // KOL 信号
+            else if (renownedCount >= 3) {
+                signalType = 'kol';
+                emoji = '👑👑';
+                priority = 70;
+            } else if (renownedCount >= 1) {
                 signalType = 'kol';
                 emoji = '👑';
-            } else if (priceChange5m >= 20) {
+                priority = 60;
+            }
+            // 飙升信号
+            else if (priceChange1h >= 100) {
+                signalType = 'surge';
+                emoji = '🚀🚀';
+                priority = 50;
+            } else if (priceChange1h >= 30) {
                 signalType = 'surge';
                 emoji = '🚀';
+                priority = 40;
             }
             
             const signal = this.createSignal(token, signalType, emoji);
             if (signal && this.isNewSignal(signal)) {
-                const info = signalType === 'smart_money' ? `${smartMoney} 个聪明钱` :
-                             signalType === 'kol' ? `${kolCount} 个KOL` :
-                             signalType === 'surge' ? `5m +${priceChange5m.toFixed(1)}%` : '';
-                console.log(`[GMGN Scout] ${emoji} ${signal.symbol} (${signal.chain}) - ${info}`);
+                // 打印有价值的信号
+                let info = [];
+                if (smartDegenCount > 0) info.push(`${smartDegenCount}聪明钱`);
+                if (renownedCount > 0) info.push(`${renownedCount}KOL`);
+                if (priceChange1h > 10) info.push(`1h +${priceChange1h.toFixed(0)}%`);
+                if (sniperCount > 5) info.push(`${sniperCount}狙击手`);
+                
+                console.log(`[GMGN Scout] ${emoji} ${signal.symbol} (${signal.chain}) - ${info.join(', ')}`);
+                
+                // 添加额外数据到信号
+                signal.smart_degen_count = smartDegenCount;
+                signal.renowned_count = renownedCount;
+                signal.sniper_count = sniperCount;
+                signal.price_change_1h = priceChange1h;
+                signal.bundler_rate = token.bundler_rate || 0;
+                signal.rug_ratio = token.rug_ratio || 0;
+                signal.is_honeypot = token.is_honeypot || 0;
+                signal.priority = priority;
+                
                 this.emit('signal', signal);
             }
         }

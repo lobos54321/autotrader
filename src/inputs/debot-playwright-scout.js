@@ -159,11 +159,36 @@ export class DebotPlaywrightScout extends EventEmitter {
     
     /**
      * 处理信号数据 (AI信号卡片)
+     * 
+     * DeBot heatmap API 返回格式:
+     * {
+     *   data: {
+     *     meta: {
+     *       signals: {
+     *         "代币地址": {
+     *           signal_count: 8,
+     *           first_time: 1766365322,
+     *           first_price: 0.0000354959,
+     *           max_price: 0.0004324634,
+     *           max_price_gain: 11.18,  // 最大涨幅倍数
+     *           token_level: "silver"   // bronze/silver/gold
+     *         }
+     *       }
+     *     },
+     *     heatmap: [...]
+     *   }
+     * }
      */
     handleSignalData(url, data) {
+        // 检查是否是 heatmap API (包含 meta.signals)
+        if (data?.data?.meta?.signals) {
+            this.handleHeatmapSignals(data.data.meta.signals);
+            return;
+        }
+        
+        // 其他格式的信号数据
         let items = [];
         
-        // 尝试提取列表
         if (data?.data?.list) items = data.data.list;
         else if (data?.data?.items) items = data.data.items;
         else if (data?.data && Array.isArray(data.data)) items = data.data;
@@ -171,16 +196,88 @@ export class DebotPlaywrightScout extends EventEmitter {
         else if (Array.isArray(data)) items = data;
         
         if (items.length === 0) {
-            console.log(`[DeBot Scout] ⚠️ 信号API无数据, 结构: ${JSON.stringify(data).slice(0, 300)}`);
+            // 不再打印警告，减少日志噪音
             return;
         }
         
         console.log(`[DeBot Scout] 📊 获取到 ${items.length} 条信号`);
         
-        // 处理每个信号
         for (const item of items) {
             this.processSignalItem(item);
         }
+    }
+    
+    /**
+     * 处理 heatmap API 的 signals 数据
+     */
+    handleHeatmapSignals(signals) {
+        const tokenAddresses = Object.keys(signals);
+        if (tokenAddresses.length === 0) return;
+        
+        console.log(`[DeBot Scout] 📊 获取到 ${tokenAddresses.length} 个 AI 信号代币`);
+        
+        // 按 signal_count 或 max_price_gain 排序
+        const sortedTokens = tokenAddresses
+            .map(addr => ({ address: addr, ...signals[addr] }))
+            .sort((a, b) => (b.signal_count || 0) - (a.signal_count || 0))
+            .slice(0, 20);
+        
+        for (const token of sortedTokens) {
+            this.processHeatmapSignal(token);
+        }
+    }
+    
+    /**
+     * 处理单个 heatmap 信号
+     */
+    processHeatmapSignal(token) {
+        const tokenAddress = token.address;
+        if (!tokenAddress) return;
+        
+        // 检查是否重复 (30分钟内)
+        const cacheKey = `heatmap:${tokenAddress}`;
+        const now = Date.now();
+        if (this.lastSeenTokens.has(cacheKey)) {
+            const lastSeen = this.lastSeenTokens.get(cacheKey);
+            if (now - lastSeen < 30 * 60 * 1000) return;
+        }
+        this.lastSeenTokens.set(cacheKey, now);
+        
+        // 检测链 - SOL 地址通常不以 0x 开头
+        const chain = tokenAddress.startsWith('0x') ? 'BSC' : 'SOL';
+        
+        // 构建信号
+        const signal = {
+            source: 'DeBot_AI',
+            type: 'AI_SIGNAL',
+            chain: chain,
+            tokenAddress: tokenAddress,
+            tokenName: tokenAddress.slice(0, 8) + '...',
+            
+            // DeBot heatmap 特有数据
+            signalCount: token.signal_count || 0,
+            firstTime: token.first_time || 0,
+            firstPrice: token.first_price || 0,
+            maxPrice: token.max_price || 0,
+            maxPriceGain: token.max_price_gain || 0,  // 🔥 最大涨幅倍数
+            tokenLevel: token.token_level || 'bronze', // bronze/silver/gold
+            
+            timestamp: now,
+            raw: token
+        };
+        
+        // 根据 token_level 和涨幅判断质量
+        const levelEmoji = signal.tokenLevel === 'gold' ? '🥇' : 
+                          signal.tokenLevel === 'silver' ? '🥈' : '🥉';
+        
+        // 只打印有意义的信号 (signal_count >= 3 或 max_price_gain >= 3)
+        if (signal.signalCount >= 3 || signal.maxPriceGain >= 3) {
+            console.log(`[DeBot Scout] ${levelEmoji} AI信号: ${tokenAddress.slice(0, 12)}...`);
+            console.log(`   📊 ${signal.signalCount}次信号, 最高涨幅 ${signal.maxPriceGain.toFixed(1)}x`);
+        }
+        
+        // 发送信号
+        this.emit('signal', signal);
     }
     
     /**
