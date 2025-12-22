@@ -1,13 +1,21 @@
 /**
  * DeBot Scout - 引擎 A: 猎手侦察模块
  * 
- * 通过 DeBot Heatmap API 获取聪明钱信号，作为独立触发源
+ * 通过 DeBot API 获取多维度信号数据
  * 
- * 核心价值：
- * - signal_count: 信号次数（多少聪明钱买入）
+ * API 端点：
+ * - /community/signal/channel/heatmap - AI信号列表 + 信号统计
+ * - /community/signal/activity/rank - 热门代币排行榜
+ * - /v1/nitter/story/latest - AI叙事报告
+ * - /community/signal/token/metrics - 代币详细指标
+ * 
+ * 核心数据：
+ * - signal_count: 信号次数
  * - max_price_gain: 最大涨幅倍数
  * - token_level: 代币等级 (bronze/silver/gold)
- * - heatmap: 热力图时间线
+ * - smart_wallet_count: 聪明钱数量
+ * - activity_score: 活跃度分数
+ * - AI rating: AI 叙事评分
  */
 
 import axios from 'axios';
@@ -20,33 +28,21 @@ class DeBotScout extends EventEmitter {
         // DeBot API 配置
         this.config = {
             baseUrl: 'https://debot.ai/api',
-            // Cookie 需要定期更新（登录后从浏览器获取）
             cookie: process.env.DEBOT_COOKIE || '',
             userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36',
             
             // 轮询间隔（毫秒）
-            pollInterval: 15000, // 15秒（防止 Cloudflare 限流）
-            
-            // 信号触发阈值
-            signalThreshold: {
-                minSignalCount: 2,   // 最少 2 次信号
-                minGain: 2.0,        // 最小涨幅 2x
-                // 代币等级权重
-                levelWeight: {
-                    'gold': 30,
-                    'silver': 20,
-                    'bronze': 10
-                }
-            },
+            pollInterval: 15000, // 15秒
             
             // 支持的链
             chains: ['solana', 'bsc']
         };
         
         this.isRunning = false;
-        this.lastSeenTokens = new Map(); // 防止重复触发
-        this.processedSignals = new Set(); // 已处理的信号
+        this.lastSeenTokens = new Map();
+        this.processedSignals = new Set();
         this.pollTimers = {};
+        this.aiReportCache = new Map(); // AI报告缓存
     }
     
     /**
@@ -112,7 +108,92 @@ class DeBotScout extends EventEmitter {
     }
     
     /**
-     * 解析 Heatmap 数据中的信号
+     * 获取 Activity Rank（热门代币排行榜）
+     */
+    async fetchActivityRank(chain = 'solana') {
+        try {
+            const requestId = this.generateRequestId();
+            const url = `${this.config.baseUrl}/community/signal/activity/rank?request_id=${requestId}&chain=${chain}`;
+            
+            const response = await axios.get(url, {
+                headers: this.getHeaders(),
+                timeout: 15000
+            });
+            
+            if (response.data.code === 0 && response.data.data) {
+                return response.data.data;
+            }
+            
+            return null;
+        } catch (error) {
+            console.error(`[DeBot] Activity Rank error: ${error.message}`);
+            return null;
+        }
+    }
+    
+    /**
+     * 获取 AI 叙事报告
+     */
+    async fetchAIReport(tokenAddress) {
+        // 检查缓存（1小时有效）
+        const cached = this.aiReportCache.get(tokenAddress);
+        if (cached && Date.now() - cached.timestamp < 60 * 60 * 1000) {
+            return cached.data;
+        }
+        
+        try {
+            const requestId = this.generateRequestId();
+            const url = `${this.config.baseUrl}/v1/nitter/story/latest?request_id=${requestId}&ca_address=${tokenAddress}`;
+            
+            const response = await axios.get(url, {
+                headers: this.getHeaders(),
+                timeout: 15000
+            });
+            
+            if (response.data.code === 0 && response.data.data?.history?.story) {
+                const report = response.data.data.history;
+                
+                // 缓存结果
+                this.aiReportCache.set(tokenAddress, {
+                    data: report,
+                    timestamp: Date.now()
+                });
+                
+                return report;
+            }
+            
+            return null;
+        } catch (error) {
+            // AI报告可能不存在，不打印错误
+            return null;
+        }
+    }
+    
+    /**
+     * 获取代币详细指标
+     */
+    async fetchTokenMetrics(tokenAddress, chain = 'solana') {
+        try {
+            const requestId = this.generateRequestId();
+            const url = `${this.config.baseUrl}/community/signal/token/metrics?request_id=${requestId}&chain=${chain}&token=${tokenAddress}`;
+            
+            const response = await axios.get(url, {
+                headers: this.getHeaders(),
+                timeout: 15000
+            });
+            
+            if (response.data.code === 0 && response.data.data) {
+                return response.data.data;
+            }
+            
+            return null;
+        } catch (error) {
+            return null;
+        }
+    }
+    
+    /**
+     * 解析 Heatmap 数据中的信号（保留原始数据，不过滤）
      */
     parseHeatmapSignals(data, chain) {
         const signals = [];
@@ -132,22 +213,19 @@ class DeBotScout extends EventEmitter {
             
             const signal = {
                 source: 'DeBot',
-                type: 'SMART_MONEY',
+                type: 'AI_SIGNAL',
                 engine: 'scout',
                 chain: chain === 'solana' ? 'SOL' : 'BSC',
                 tokenAddress: tokenAddress,
                 
-                // DeBot 信号数据
+                // DeBot 原始信号数据
                 signalCount: signalData.signal_count || 0,
                 firstTime: signalData.first_time ? new Date(signalData.first_time * 1000) : null,
                 firstPrice: signalData.first_price || 0,
                 maxPrice: signalData.max_price || 0,
-                maxPriceGain: signalData.max_price_gain || 0,  // 🔥 涨幅倍数
-                tokenLevel: signalData.token_level || 'bronze', // bronze/silver/gold
+                maxPriceGain: signalData.max_price_gain || 0,
+                tokenLevel: signalData.token_level || 'unknown',
                 signalTags: signalData.signal_tags || [],
-                
-                // 计算分数
-                score: this.calculateSignalScore(signalData),
                 
                 timestamp: Date.now()
             };
@@ -159,73 +237,122 @@ class DeBotScout extends EventEmitter {
     }
     
     /**
-     * 计算信号分数
+     * 解析 Activity Rank 数据（热门代币）
      */
-    calculateSignalScore(signalData) {
-        let score = 0;
+    parseActivityRank(data, chain) {
+        const tokens = [];
         
-        // 信号次数分数 (每次信号 +5 分，最多 30 分)
-        score += Math.min(signalData.signal_count * 5, 30);
+        if (!Array.isArray(data)) {
+            return tokens;
+        }
         
-        // 涨幅分数 (每倍 +10 分，最多 50 分)
-        score += Math.min(Math.floor(signalData.max_price_gain || 0) * 10, 50);
+        for (const token of data) {
+            tokens.push({
+                source: 'DeBot',
+                type: 'HOT_TOKEN',
+                engine: 'scout',
+                chain: chain === 'solana' ? 'SOL' : 'BSC',
+                tokenAddress: token.address,
+                
+                // 基本信息
+                name: token.name,
+                symbol: token.symbol,
+                logo: token.logo,
+                
+                // 市场数据
+                price: token.market_info?.price || 0,
+                marketCap: token.market_info?.mkt_cap || 0,
+                holders: token.market_info?.holders || 0,
+                volume: token.market_info?.volume || 0,
+                liquidity: token.pair_summary_info?.liquidity || 0,
+                
+                // 涨跌幅
+                change5m: token.market_info?.percent_5m || 0,
+                change1h: token.market_info?.percent_1h || 0,
+                change24h: token.market_info?.percent_24h || 0,
+                
+                // 交易数据
+                buys: token.market_info?.buys || 0,
+                sells: token.market_info?.sells || 0,
+                swaps: token.market_info?.swaps || 0,
+                
+                // 聪明钱数据 🔥
+                smartWalletOnline: token.smart_wallet_online_count || 0,
+                smartWalletTotal: token.smart_wallet_total_count || 0,
+                maxPriceGain: token.max_price_gain || 0,
+                tokenTier: token.token_tier || '',
+                activityScore: token.activity_score || 0,
+                
+                // 社交信息
+                twitter: token.social_info?.twitter || '',
+                website: token.social_info?.website || '',
+                description: token.social_info?.description || '',
+                
+                // 安全信息
+                isMintAbandoned: token.safe_info?.solana?.is_mint_abandoned === 1,
+                
+                // 标签
+                tags: token.tags || [],
+                
+                timestamp: Date.now()
+            });
+        }
         
-        // 代币等级分数
-        const levelWeight = this.config.signalThreshold.levelWeight;
-        score += levelWeight[signalData.token_level] || 0;
-        
-        return score;
+        return tokens;
     }
     
     /**
-     * 检查是否为有效的猎手信号
+     * 解析 AI 报告数据
      */
-    isValidHunterSignal(signal) {
-        // 1. 信号次数检查
-        if (signal.signalCount < this.config.signalThreshold.minSignalCount) {
-            return { 
-                valid: false, 
-                reason: `信号次数不足: ${signal.signalCount} < ${this.config.signalThreshold.minSignalCount}` 
-            };
+    parseAIReport(report) {
+        if (!report?.story) {
+            return null;
         }
         
-        // 2. 涨幅检查（可选，太高可能已经错过）
-        // if (signal.maxPriceGain > 20) {
-        //     return { valid: false, reason: `涨幅过高已错过: ${signal.maxPriceGain.toFixed(1)}x` };
-        // }
+        const story = report.story;
+        const storyEn = report.story_en || story;
         
-        // 3. 代币等级检查（至少 bronze）
-        if (!['bronze', 'silver', 'gold'].includes(signal.tokenLevel)) {
-            return { valid: false, reason: `代币等级未知: ${signal.tokenLevel}` };
-        }
-        
-        // Gold 级别代币直接通过
-        if (signal.tokenLevel === 'gold') {
-            return { valid: true, reason: `🏆 GOLD 级别代币！${signal.signalCount} 次信号，${signal.maxPriceGain.toFixed(1)}x 涨幅` };
-        }
-        
-        // Silver 级别需要 3+ 信号
-        if (signal.tokenLevel === 'silver' && signal.signalCount >= 3) {
-            return { valid: true, reason: `🥈 SILVER 级别，${signal.signalCount} 次信号，${signal.maxPriceGain.toFixed(1)}x 涨幅` };
-        }
-        
-        // Bronze 级别需要 5+ 信号且有涨幅
-        if (signal.tokenLevel === 'bronze' && signal.signalCount >= 5 && signal.maxPriceGain >= 2) {
-            return { valid: true, reason: `🥉 BRONZE 级别，${signal.signalCount} 次信号，${signal.maxPriceGain.toFixed(1)}x 涨幅` };
-        }
-        
-        return { 
-            valid: true, // 先放宽，让后续引擎过滤
-            reason: `${signal.tokenLevel.toUpperCase()}: ${signal.signalCount} 信号, ${signal.maxPriceGain.toFixed(1)}x` 
+        return {
+            projectName: story.project_name,
+            contractAddress: story.contract_address,
+            
+            // 叙事类型
+            narrativeType: story.narrative_type,
+            
+            // 背景起源
+            origin: story.background?.origin?.text || '',
+            
+            // 传播数据
+            distribution: {
+                celebritySupport: story.distribution?.celebrity_support?.text || '',
+                maxViews: story.distribution?.max_views?.text || '',
+                maxLikes: story.distribution?.max_likes?.text || '',
+                maxComments: story.distribution?.max_comments?.text || '',
+                communityParticipation: story.distribution?.community_participation?.text || '',
+                negativeIncidents: story.distribution?.negative_incidents?.text || ''
+            },
+            
+            // AI 评分 🔥
+            rating: {
+                score: parseInt(story.rating?.score) || 0,
+                reason: story.rating?.reason || ''
+            },
+            
+            // 英文版评分理由
+            ratingReasonEn: storyEn.rating?.reason || '',
+            
+            // 来源推文
+            sourceTweets: report.source_tweets || [],
+            
+            // 生成时间
+            generatedAt: report.generated_at
         };
     }
     
     /**
-     * 处理信号并发射事件
+     * 处理信号并发射事件（不过滤，发送所有信号）
      */
     async processSignals(signals, chain) {
-        const validSignals = [];
-        
         for (const signal of signals) {
             const signalKey = `${chain}:${signal.tokenAddress}`;
             
@@ -235,32 +362,61 @@ class DeBotScout extends EventEmitter {
                 continue;
             }
             
-            // 验证信号
-            const validation = this.isValidHunterSignal(signal);
+            // 标记已处理
+            this.lastSeenTokens.set(signalKey, Date.now());
+            this.processedSignals.add(signalKey);
             
-            if (validation.valid) {
-                // 标记已处理
-                this.lastSeenTokens.set(signalKey, Date.now());
-                this.processedSignals.add(signalKey);
-                
-                signal.isHunterTrigger = true;
-                signal.validationReason = validation.reason;
-                
-                validSignals.push(signal);
-                
-                console.log(`\n🎯 [DeBot Scout] 发现猎手信号!`);
-                console.log(`   Token: ${signal.tokenAddress.slice(0, 8)}... (${signal.chain})`);
-                console.log(`   等级: ${signal.tokenLevel.toUpperCase()}`);
-                console.log(`   信号次数: ${signal.signalCount}`);
-                console.log(`   最大涨幅: ${signal.maxPriceGain.toFixed(1)}x`);
-                console.log(`   评分: ${signal.score}`);
-                
-                // 发射信号事件
-                this.emit('hunter-signal', signal);
+            // 尝试获取 AI 报告
+            const aiReport = await this.fetchAIReport(signal.tokenAddress);
+            if (aiReport) {
+                signal.aiReport = this.parseAIReport(aiReport);
             }
+            
+            console.log(`\n🎯 [DeBot Scout] 发现信号!`);
+            console.log(`   Token: ${signal.tokenAddress.slice(0, 8)}... (${signal.chain})`);
+            console.log(`   等级: ${signal.tokenLevel || 'N/A'}`);
+            console.log(`   信号次数: ${signal.signalCount}`);
+            console.log(`   最大涨幅: ${(signal.maxPriceGain || 0).toFixed(1)}x`);
+            if (signal.aiReport?.rating?.score) {
+                console.log(`   AI评分: ${signal.aiReport.rating.score}/10`);
+            }
+            
+            // 发射信号事件
+            this.emit('hunter-signal', signal);
         }
         
-        return validSignals;
+        return signals;
+    }
+    
+    /**
+     * 处理热门代币数据
+     */
+    async processHotTokens(tokens, chain) {
+        for (const token of tokens) {
+            const signalKey = `hot:${chain}:${token.tokenAddress}`;
+            
+            // 检查是否5分钟内已处理
+            const lastSeen = this.lastSeenTokens.get(signalKey);
+            if (lastSeen && Date.now() - lastSeen < 5 * 60 * 1000) {
+                continue;
+            }
+            
+            // 标记已处理
+            this.lastSeenTokens.set(signalKey, Date.now());
+            
+            // 尝试获取 AI 报告（只对有聪明钱的代币）
+            if (token.smartWalletTotal > 0) {
+                const aiReport = await this.fetchAIReport(token.tokenAddress);
+                if (aiReport) {
+                    token.aiReport = this.parseAIReport(aiReport);
+                }
+            }
+            
+            // 发射热门代币事件
+            this.emit('hot-token', token);
+        }
+        
+        return tokens;
     }
     
     /**
@@ -268,14 +424,23 @@ class DeBotScout extends EventEmitter {
      */
     async pollChain(chain) {
         try {
-            const data = await this.fetchHeatmap(chain);
-            
-            if (data) {
-                const signals = this.parseHeatmapSignals(data, chain);
-                
+            // 1. 获取 Heatmap 信号
+            const heatmapData = await this.fetchHeatmap(chain);
+            if (heatmapData) {
+                const signals = this.parseHeatmapSignals(heatmapData, chain);
                 if (signals.length > 0) {
-                    console.log(`[DeBot Scout] ${chain} 获取到 ${signals.length} 个信号`);
+                    console.log(`[DeBot Scout] ${chain} Heatmap: ${signals.length} 个信号`);
                     await this.processSignals(signals, chain);
+                }
+            }
+            
+            // 2. 获取 Activity Rank 热门代币
+            const rankData = await this.fetchActivityRank(chain);
+            if (rankData) {
+                const hotTokens = this.parseActivityRank(rankData, chain);
+                if (hotTokens.length > 0) {
+                    console.log(`[DeBot Scout] ${chain} Rank: ${hotTokens.length} 个热门代币`);
+                    await this.processHotTokens(hotTokens, chain);
                 }
             }
             
@@ -295,15 +460,15 @@ class DeBotScout extends EventEmitter {
         
         if (!this.config.cookie) {
             console.warn('[DeBot] ⚠️ 未配置 DEBOT_COOKIE，Scout 无法启动');
-            console.warn('[DeBot] 请在 Zeabur 环境变量中添加 DEBOT_COOKIE');
+            console.warn('[DeBot] 请在环境变量中添加 DEBOT_COOKIE');
             return;
         }
         
         this.isRunning = true;
         console.log('\n🔍 [DeBot Scout] 引擎 A 启动');
         console.log(`   轮询间隔: ${this.config.pollInterval / 1000}s`);
-        console.log(`   最小信号次数: >= ${this.config.signalThreshold.minSignalCount}`);
         console.log(`   监控链: ${this.config.chains.join(', ')}`);
+        console.log(`   数据源: Heatmap + ActivityRank + AI Report`);
         
         // 立即执行一次
         this.config.chains.forEach(chain => this.pollChain(chain));
@@ -315,6 +480,9 @@ class DeBotScout extends EventEmitter {
                 this.config.pollInterval
             );
         });
+        
+        // 定期清理缓存
+        this.cleanupTimer = setInterval(() => this.cleanupCache(), 30 * 60 * 1000);
     }
     
     /**
@@ -328,25 +496,42 @@ class DeBotScout extends EventEmitter {
         });
         this.pollTimers = {};
         
+        if (this.cleanupTimer) {
+            clearInterval(this.cleanupTimer);
+        }
+        
         console.log('[DeBot Scout] 已停止');
     }
     
     /**
      * 获取当前热门代币（用于 Dashboard）
      */
-    async getHotTokens(chain = 'solana', limit = 10) {
-        const data = await this.fetchHeatmap(chain);
+    async getHotTokens(chain = 'solana', limit = 20) {
+        const rankData = await this.fetchActivityRank(chain);
         
-        if (!data?.meta?.signals) {
+        if (!rankData) {
             return [];
         }
         
-        const signals = this.parseHeatmapSignals(data, chain);
+        const tokens = this.parseActivityRank(rankData, chain);
+        return tokens.slice(0, limit);
+    }
+    
+    /**
+     * 获取代币完整信息（包含 AI 报告）
+     */
+    async getTokenInfo(tokenAddress, chain = 'solana') {
+        const [metrics, aiReport] = await Promise.all([
+            this.fetchTokenMetrics(tokenAddress, chain),
+            this.fetchAIReport(tokenAddress)
+        ]);
         
-        // 按分数排序
-        return signals
-            .sort((a, b) => b.score - a.score)
-            .slice(0, limit);
+        return {
+            tokenAddress,
+            chain,
+            metrics: metrics || null,
+            aiReport: aiReport ? this.parseAIReport(aiReport) : null
+        };
     }
     
     /**
@@ -360,6 +545,13 @@ class DeBotScout extends EventEmitter {
             if (now - time > expireTime) {
                 this.lastSeenTokens.delete(key);
                 this.processedSignals.delete(key);
+            }
+        }
+        
+        // 清理 AI 报告缓存
+        for (const [key, cached] of this.aiReportCache) {
+            if (now - cached.timestamp > expireTime) {
+                this.aiReportCache.delete(key);
             }
         }
     }
