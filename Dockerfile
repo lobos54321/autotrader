@@ -1,30 +1,17 @@
-# Use Node.js 20 LTS (better compatibility)
-FROM node:20-slim
+# Use Node.js 20 LTS Alpine (更小更快)
+FROM node:20-alpine
 
-# Install system dependencies for Chromium and Telegram
-RUN apt-get update && apt-get install -y \
-    chromium \
-    chromium-driver \
-    xvfb \
-    fonts-liberation \
-    fonts-noto-cjk \
-    libnss3 \
-    libxss1 \
-    libasound2 \
-    libappindicator3-1 \
-    xdg-utils \
-    curl \
-    ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+# Install only necessary dependencies for better-sqlite3
+RUN apk add --no-cache python3 make g++ 
 
 # Set working directory
 WORKDIR /app
 
-# Copy package files
+# Copy package files first (利用 Docker 缓存)
 COPY package*.json ./
 
 # Install dependencies
-RUN npm ci --only=production
+RUN npm ci --only=production && npm cache clean --force
 
 # Copy application code
 COPY . .
@@ -32,13 +19,8 @@ COPY . .
 # Create data directory for SQLite
 RUN mkdir -p /app/data
 
-# Set environment variables for Chromium
-ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
-    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium \
-    DISPLAY=:99
-
-# Expose port (if needed for health checks)
+# Expose port for dashboard
 EXPOSE 3000
 
-# Start Xvfb, init database, then start application
-CMD Xvfb :99 -screen 0 1024x768x16 & npm run db:init && npm start
+# Initialize database and start
+CMD npm run db:init && npm start
