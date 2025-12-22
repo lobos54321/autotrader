@@ -117,13 +117,11 @@ export class DebotPlaywrightScout extends EventEmitter {
         this.page.on('response', async (response) => {
             const url = response.url();
             
-            // 只处理 DeBot API 请求
-            if (!url.includes('debot')) return;
-            
-            // 调试：打印所有 API 请求
-            const shortUrl = url.split('?')[0].split('/').slice(-2).join('/');
-            if (!url.includes('static') && !url.includes('.js') && !url.includes('.css')) {
-                console.log(`[DeBot Scout] 📡 捕获: ${shortUrl}`);
+            // 跳过非 API 请求
+            if (url.includes('.js') || url.includes('.css') || url.includes('.png') || 
+                url.includes('.svg') || url.includes('.woff') || url.includes('google') ||
+                url.includes('cdn-cgi') || url.includes('cloudflare')) {
+                return;
             }
             
             try {
@@ -131,16 +129,26 @@ export class DebotPlaywrightScout extends EventEmitter {
                 if (!contentType.includes('json')) return;
                 
                 const data = await response.json();
+                const shortUrl = url.split('?')[0].split('/').slice(-2).join('/');
                 
-                // 跳过钱包列表数据（只有 publicKey，没有代币地址）
-                if (url.includes('debot/wallets') || url.includes('debot/connect')) {
-                    return; // 这是钱包数据，不是代币交易
+                // 跳过无用的 API
+                if (url.includes('debot/wallets') || url.includes('debot/connect') ||
+                    url.includes('notification') || url.includes('unread') ||
+                    url.includes('user/info') || url.includes('config/list')) {
+                    return;
                 }
                 
-                // 处理代币交易数据
-                if (url.includes('trade') || url.includes('transaction') || 
-                    url.includes('activity') || url.includes('token')) {
-                    this.handleSmartMoneyData(url, data);
+                // 信号/榜单 API - 这是核心数据！
+                if (url.includes('signal') || url.includes('rank') || url.includes('list')) {
+                    console.log(`[DeBot Scout] 📡 信号API: ${shortUrl}`);
+                    this.handleSignalData(url, data);
+                    return;
+                }
+                
+                // 打印其他 API 用于调试
+                if (data?.data) {
+                    const sample = JSON.stringify(data.data).slice(0, 200);
+                    console.log(`[DeBot Scout] 📡 ${shortUrl}: ${sample}...`);
                 }
                 
             } catch (error) {
@@ -150,97 +158,91 @@ export class DebotPlaywrightScout extends EventEmitter {
     }
     
     /**
-     * 处理聪明钱数据
+     * 处理信号数据 (AI信号卡片)
      */
-    handleSmartMoneyData(url, data) {
-        // 尝试从不同格式中提取数据
+    handleSignalData(url, data) {
         let items = [];
         
-        if (data?.data?.list && Array.isArray(data.data.list)) {
-            items = data.data.list;
-        } else if (data?.data && Array.isArray(data.data)) {
-            items = data.data;
-        } else if (data?.list && Array.isArray(data.list)) {
-            items = data.list;
-        } else if (Array.isArray(data)) {
-            items = data;
+        // 尝试提取列表
+        if (data?.data?.list) items = data.data.list;
+        else if (data?.data?.items) items = data.data.items;
+        else if (data?.data && Array.isArray(data.data)) items = data.data;
+        else if (data?.list) items = data.list;
+        else if (Array.isArray(data)) items = data;
+        
+        if (items.length === 0) {
+            console.log(`[DeBot Scout] ⚠️ 信号API无数据, 结构: ${JSON.stringify(data).slice(0, 300)}`);
+            return;
         }
         
-        if (items.length === 0) return;
+        console.log(`[DeBot Scout] 📊 获取到 ${items.length} 条信号`);
         
-        console.log(`[DeBot Scout] 📊 获取到 ${items.length} 条聪明钱数据`);
-        
-        // 调试：打印第一条数据的结构
-        if (items[0]) {
-            const keys = Object.keys(items[0]);
-            console.log(`[DeBot Scout] 📋 数据字段: ${keys.slice(0, 10).join(', ')}`);
-        }
-        
-        // 处理每条数据
-        for (const item of items.slice(0, 20)) {
-            const signal = this.createSignal(item);
-            if (signal && this.isNewSignal(signal)) {
-                const action = signal.action === 'buy' ? '买入' : '卖出';
-                const emoji = signal.action === 'buy' ? '🟢' : '🔴';
-                console.log(`[DeBot Scout] ${emoji} 聪明钱${action}: ${signal.symbol} (${signal.chain})`);
-                this.emit('signal', signal);
-            }
+        // 处理每个信号
+        for (const item of items) {
+            this.processSignalItem(item);
         }
     }
     
     /**
-     * 创建信号对象
+     * 处理单个信号项
      */
-    createSignal(item) {
-        // 尝试更多字段名获取代币地址
-        const tokenCA = item.token_address || item.address || item.ca || item.contract || 
-                        item.tokenAddress || item.token || item.mint || item.tokenMint ||
-                        item.coin_address || item.coinAddress;
+    processSignalItem(item) {
+        // 尝试提取代币地址（不同字段名）
+        const tokenAddress = item.token_address || item.tokenAddress || item.address || 
+                            item.mint || item.contract || item.token || item.ca;
         
-        if (!tokenCA) {
-            // 调试：打印无法解析的数据
-            console.log(`[DeBot Scout] ⚠️ 无法获取代币地址, 字段: ${Object.keys(item).slice(0, 8).join(', ')}`);
-            return null;
+        if (!tokenAddress) {
+            // 打印数据结构以便调试
+            const keys = Object.keys(item).slice(0, 10);
+            console.log(`[DeBot Scout] ⚠️ 信号无代币地址, 字段: ${keys.join(', ')}`);
+            return;
         }
         
-        // 判断是买入还是卖出
-        const action = (item.type === 'buy' || item.action === 'buy' || item.side === 'buy' || 
-                        item.direction === 'buy' || item.is_buy === true) ? 'buy' : 'sell';
-        
-        // 判断链
-        let chain = 'SOL';
-        if (item.chain) {
-            chain = item.chain.toUpperCase();
-            if (chain === 'SOLANA') chain = 'SOL';
-        } else if (tokenCA.startsWith('0x')) {
-            chain = 'BSC';
+        // 检查是否重复
+        const cacheKey = `${tokenAddress}_${Date.now() - (Date.now() % 60000)}`; // 1分钟内去重
+        if (this.lastSeenTokens.has(tokenAddress)) {
+            const lastSeen = this.lastSeenTokens.get(tokenAddress);
+            if (Date.now() - lastSeen < 60000) return; // 1分钟内重复
         }
+        this.lastSeenTokens.set(tokenAddress, Date.now());
         
-        // 获取 symbol
-        const symbol = item.symbol || item.token_symbol || item.tokenSymbol || 
-                       item.name || item.token_name || item.tokenName || 'Unknown';
-        
-        return {
-            token_ca: tokenCA,
-            chain: chain,
-            symbol: symbol,
-            name: item.name || item.token_name || symbol || 'Unknown',
-            signal_type: 'smart_money',
-            action: action,
-            emoji: action === 'buy' ? '🟢' : '🔴',
-            wallet: item.wallet || item.address || item.from,
-            amount: item.amount || item.value || 0,
+        // 提取信号详情
+        const signal = {
+            source: 'DeBot',
+            type: 'AI_SIGNAL',
+            chain: item.chain || 'sol',
+            tokenAddress: tokenAddress,
+            tokenName: item.name || item.symbol || item.token_name || 'Unknown',
+            
+            // DeBot 特有的丰富数据
+            smartMoneyCount: item.smart_money_count || item.smartMoneyCount || item.whale_count || 0,
+            avgBuyAmount: item.avg_buy_amount || item.avgBuyAmount || 0,
+            marketCap: item.market_cap || item.marketCap || item.mc || 0,
+            holders: item.holders || item.holder_count || 0,
             price: item.price || 0,
-            source: 'debot_playwright',
-            timestamp: Date.now()
+            priceChange: item.price_change || item.priceChange || 0,
+            liquidity: item.liquidity || item.pool || item.lp || 0,
+            top10Percent: item.top10_percent || item.top10 || 0,
+            multiplier: item.multiplier || item.x || 0,
+            
+            timestamp: Date.now(),
+            raw: item
         };
+        
+        // 打印发现的信号
+        console.log(`[DeBot Scout] 🔔 AI信号: ${signal.tokenName} (${tokenAddress.slice(0, 8)}...)`);
+        console.log(`   💰 ${signal.smartMoneyCount}个聪明钱包买入, 平均$${signal.avgBuyAmount}`);
+        console.log(`   📊 市值: $${signal.marketCap}, 池子: $${signal.liquidity}`);
+        
+        // 发送信号
+        this.emit('signal', signal);
     }
     
     /**
      * 检查是否是新信号
      */
     isNewSignal(signal) {
-        const cacheKey = `${signal.chain}:${signal.token_ca}:${signal.action}`;
+        const cacheKey = `${signal.chain}:${signal.tokenAddress}`;
         const now = Date.now();
         
         if (this.lastSeenTokens.has(cacheKey)) {
