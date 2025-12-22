@@ -573,6 +573,7 @@ class SentimentArbitrageSystem {
 
       // Collect Twitter data using Grok API
       let twitterData = null;
+      let grokNarrativeScore = null;
       try {
         console.log('   🐦 Searching Twitter via Grok API...');
         twitterData = await this.grokClient.searchToken(
@@ -580,7 +581,38 @@ class SentimentArbitrageSystem {
           token_ca,
           15  // 15-minute window
         );
-        console.log(`   ✅ Twitter: ${twitterData.mention_count} mentions, ${twitterData.engagement} engagement`);
+        
+        // 提取 Grok 叙事评分
+        if (twitterData.narrative_score) {
+          grokNarrativeScore = twitterData.narrative_score;
+          const ns = grokNarrativeScore;
+          console.log(`   ✅ Twitter: ${twitterData.mention_count} mentions`);
+          console.log(`   📊 Grok 叙事评分: ${ns.total}/100 (${ns.grade}) - ${ns.recommendation}`);
+          console.log(`      - 真实性: ${ns.breakdown?.authenticity || 0}/25`);
+          console.log(`      - KOL影响: ${ns.breakdown?.kol_power || 0}/25`);
+          console.log(`      - 传播潜力: ${ns.breakdown?.viral_potential || 0}/25`);
+          console.log(`      - 时机: ${ns.breakdown?.timing || 0}/25`);
+          if (ns.reasoning) {
+            console.log(`      💡 ${ns.reasoning}`);
+          }
+        } else {
+          console.log(`   ✅ Twitter: ${twitterData.mention_count || 0} mentions, ${twitterData.engagement?.total_likes || twitterData.engagement || 0} engagement`);
+        }
+        
+        // 显示源头分析
+        if (twitterData.origin_source) {
+          const origin = twitterData.origin_source;
+          console.log(`   🔍 信号源头: ${origin.type} (${origin.is_authentic ? '✅真实' : '⚠️可疑'})`);
+          if (origin.first_tweet?.author) {
+            console.log(`      首发: ${origin.first_tweet.author} (${origin.first_tweet.followers || '?'} 粉丝)`);
+          }
+        }
+        
+        // 显示风险标记
+        if (twitterData.risk_flags && twitterData.risk_flags.length > 0) {
+          console.log(`   ⚠️ 风险: ${twitterData.risk_flags.join(', ')}`);
+        }
+        
       } catch (error) {
         console.log(`   ⚠️  Twitter search failed: ${error.message}`);
         // Continue without Twitter data
@@ -700,14 +732,23 @@ class SentimentArbitrageSystem {
         // Twitter data (from Grok API)
         twitter_mentions: twitterData.mention_count,
         twitter_unique_authors: twitterData.unique_authors,
-        twitter_kol_count: twitterData.kol_count,
-        twitter_engagement: twitterData.engagement,
+        twitter_kol_count: twitterData.kol_involvement?.real_kol_count || twitterData.kol_count || 0,
+        twitter_engagement: twitterData.engagement?.total_likes || twitterData.engagement || 0,
         twitter_sentiment: twitterData.sentiment,
-        top_tweets: twitterData.top_tweets || [],  // For KOL detection
+        top_tweets: twitterData.top_tweets || [],
+        
+        // Grok 叙事评分（新增）
+        grok_narrative_score: grokNarrativeScore,
+        grok_origin_source: twitterData.origin_source || null,
+        grok_kol_involvement: twitterData.kol_involvement || null,
+        grok_bot_detection: twitterData.bot_detection || null,
+        grok_risk_flags: twitterData.risk_flags || [],
+        grok_confidence: twitterData.confidence || 'low',
+        grok_verified_token: twitterData.verified_token || false,
         
         // X validation fields
         x_unique_authors_15m: twitterData.unique_authors,
-        x_tier1_hit: twitterData.kol_count >= 1 ? 1 : 0,
+        x_tier1_hit: (twitterData.kol_involvement?.real_kol_count || twitterData.kol_count || 0) >= 1 ? 1 : 0,
         
         // ==========================================
         // 链上数据（从 snapshot 传入，用于 Graph 评分）
@@ -729,22 +770,60 @@ class SentimentArbitrageSystem {
       // Use tokenMetadata (from Step 1) for Narrative detection
       // If metadata fetch failed, tokenMetadata will have null values
       const scoreResult = await this.softScorer.calculate(socialData, tokenMetadata);
+      
+      // 如果有 Grok 叙事评分，用它来调整最终分数
+      let finalScore = scoreResult.score;
+      let grokAdjustment = 0;
+      
+      if (grokNarrativeScore && grokNarrativeScore.total) {
+        // Grok 评分权重：占最终分数的 30%
+        const grokWeight = 0.3;
+        const originalWeight = 0.7;
+        
+        // 混合计算
+        finalScore = Math.round(
+          (scoreResult.score * originalWeight) + 
+          (grokNarrativeScore.total * grokWeight)
+        );
+        grokAdjustment = finalScore - scoreResult.score;
+        
+        // 风险标记扣分
+        if (twitterData.risk_flags && twitterData.risk_flags.length > 0) {
+          const riskPenalty = Math.min(twitterData.risk_flags.length * 5, 20);
+          finalScore = Math.max(0, finalScore - riskPenalty);
+          grokAdjustment -= riskPenalty;
+        }
+        
+        // 如果 Grok 说 "run"，直接大幅扣分
+        if (grokNarrativeScore.recommendation === 'run') {
+          finalScore = Math.min(finalScore, 30);
+        } else if (grokNarrativeScore.recommendation === 'avoid') {
+          finalScore = Math.min(finalScore, 45);
+        }
+      }
 
-      console.log(`   📊 Score: ${scoreResult.score}/100`);
+      console.log(`   📊 Score: ${finalScore}/100${grokAdjustment !== 0 ? ` (Grok调整: ${grokAdjustment > 0 ? '+' : ''}${grokAdjustment})` : ''}`);
       console.log(`   Components:`);
       console.log(`      - Narrative: ${scoreResult.breakdown.narrative.score.toFixed(1)}`);
       console.log(`      - Influence: ${scoreResult.breakdown.influence.score.toFixed(1)}`);
       console.log(`      - TG Spread: ${scoreResult.breakdown.tg_spread.score.toFixed(1)}`);
       console.log(`      - Graph: ${scoreResult.breakdown.graph.score.toFixed(1)}`);
       console.log(`      - Source: ${scoreResult.breakdown.source.score.toFixed(1)}`);
+      if (grokNarrativeScore) {
+        console.log(`      - Grok叙事: ${grokNarrativeScore.total}/100 (${grokNarrativeScore.grade})`);
+      }
 
       this.stats.soft_score_computed++;
+      
+      // 更新 scoreResult 的分数为调整后的分数
+      scoreResult.score = finalScore;
+      scoreResult.grok_narrative = grokNarrativeScore;
 
       // ==========================================
       // STEP 3.1: RISK MANAGER - SIGNAL EVALUATION
       // ==========================================
       console.log('\n🛡️ [3.1/7] Risk evaluation...');
-      const riskEval = this.riskManager.evaluateSignal(signal, scoreResult.score, snapshot);
+      const riskEval = this.riskManager.evaluateSignal(signal, finalScore, snapshot);
       
       if (!riskEval.allowed) {
         console.log(`   ❌ Risk rejected: ${riskEval.reason}`);
