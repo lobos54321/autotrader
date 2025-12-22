@@ -163,6 +163,12 @@ export class DebotPlaywrightScout extends EventEmitter {
         
         console.log(`[DeBot Scout] 📊 获取到 ${items.length} 条聪明钱数据`);
         
+        // 调试：打印第一条数据的结构
+        if (items[0]) {
+            const keys = Object.keys(items[0]);
+            console.log(`[DeBot Scout] 📋 数据字段: ${keys.slice(0, 10).join(', ')}`);
+        }
+        
         // 处理每条数据
         for (const item of items.slice(0, 20)) {
             const signal = this.createSignal(item);
@@ -179,25 +185,39 @@ export class DebotPlaywrightScout extends EventEmitter {
      * 创建信号对象
      */
     createSignal(item) {
-        const tokenCA = item.token_address || item.address || item.ca || item.contract;
-        if (!tokenCA) return null;
+        // 尝试更多字段名获取代币地址
+        const tokenCA = item.token_address || item.address || item.ca || item.contract || 
+                        item.tokenAddress || item.token || item.mint || item.tokenMint ||
+                        item.coin_address || item.coinAddress;
+        
+        if (!tokenCA) {
+            // 调试：打印无法解析的数据
+            console.log(`[DeBot Scout] ⚠️ 无法获取代币地址, 字段: ${Object.keys(item).slice(0, 8).join(', ')}`);
+            return null;
+        }
         
         // 判断是买入还是卖出
-        const action = (item.type === 'buy' || item.action === 'buy' || item.side === 'buy') ? 'buy' : 'sell';
+        const action = (item.type === 'buy' || item.action === 'buy' || item.side === 'buy' || 
+                        item.direction === 'buy' || item.is_buy === true) ? 'buy' : 'sell';
         
         // 判断链
         let chain = 'SOL';
         if (item.chain) {
             chain = item.chain.toUpperCase();
+            if (chain === 'SOLANA') chain = 'SOL';
         } else if (tokenCA.startsWith('0x')) {
             chain = 'BSC';
         }
         
+        // 获取 symbol
+        const symbol = item.symbol || item.token_symbol || item.tokenSymbol || 
+                       item.name || item.token_name || item.tokenName || 'Unknown';
+        
         return {
             token_ca: tokenCA,
             chain: chain,
-            symbol: item.symbol || item.token_symbol || 'Unknown',
-            name: item.name || item.token_name || item.symbol || 'Unknown',
+            symbol: symbol,
+            name: item.name || item.token_name || symbol || 'Unknown',
             signal_type: 'smart_money',
             action: action,
             emoji: action === 'buy' ? '🟢' : '🔴',
