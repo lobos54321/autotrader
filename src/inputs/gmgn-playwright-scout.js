@@ -104,21 +104,24 @@ export class GMGNPlaywrightScout extends EventEmitter {
             // 设置网络拦截
             this.setupNetworkInterceptor();
             
-            // 访问 GMGN
-            console.log('[GMGN Scout] 正在加载 GMGN...');
-            await this.page.goto('https://gmgn.ai/discover?chain=sol', {
-                waitUntil: 'networkidle',
+            // 访问 GMGN Signal 页面 (这个页面有实时推送)
+            console.log('[GMGN Scout] 正在加载 GMGN Signal 页面...');
+            await this.page.goto('https://gmgn.ai/signal?chain=sol', {
+                waitUntil: 'load',
                 timeout: 60000
             });
             
-            console.log('[GMGN Scout] ✅ 页面加载完成');
+            // 等待页面完全加载
+            await this.page.waitForTimeout(5000);
             
-            // 设置定时刷新
+            console.log('[GMGN Scout] ✅ 页面加载完成');
+            console.log('[GMGN Scout] ✅ 正在监听实时信号...');
+            
+            // 设置定时刷新 (较长间隔，因为页面本身有实时推送)
             this.isRunning = true;
             this.scheduleRefresh();
             
             console.log('[GMGN Scout] ✅ 信号监控已启动');
-            console.log(`[GMGN Scout] 刷新间隔: ${Math.round(this.config.refreshInterval / 1000)}秒`);
             
         } catch (error) {
             console.error('[GMGN Scout] ❌ 启动失败:', error.message);
@@ -282,33 +285,26 @@ export class GMGNPlaywrightScout extends EventEmitter {
     }
     
     /**
-     * 定时刷新页面
+     * 定时刷新页面 (保持会话活跃)
      */
     scheduleRefresh() {
         if (!this.isRunning) return;
         
-        // 随机间隔，拟人化
-        const interval = 15000 + Math.random() * 10000; // 15-25秒
+        // 较长间隔 (60-90秒)，因为 signal 页面有实时推送
+        const interval = 60000 + Math.random() * 30000;
         
         this.refreshTimer = setTimeout(async () => {
             if (!this.isRunning) return;
             
             try {
-                // 随机选择一个页面刷新
-                const pages = [
-                    'https://gmgn.ai/discover?chain=sol',
-                    'https://gmgn.ai/trendy?chain=sol',
-                    'https://gmgn.ai/signal?chain=sol'
-                ];
-                const randomPage = pages[Math.floor(Math.random() * pages.length)];
-                
-                console.log(`[GMGN Scout] 🔄 刷新: ${randomPage.split('/').pop()}`);
-                await this.page.goto(randomPage, { 
-                    waitUntil: 'load',  // 改用 load，不等待所有网络请求
-                    timeout: 60000      // 增加超时时间
+                // 只刷新当前 signal 页面保持会话活跃
+                console.log(`[GMGN Scout] 🔄 保持会话活跃...`);
+                await this.page.reload({ 
+                    waitUntil: 'load',
+                    timeout: 60000
                 });
                 
-                // 等待额外 3 秒让 API 请求完成
+                // 等待数据加载
                 await this.page.waitForTimeout(3000);
                 
             } catch (error) {
