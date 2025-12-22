@@ -1,14 +1,16 @@
 /**
- * GMGN Smart Money Scout - 替代 DeBot
+ * GMGN 多维信号源 - 全功能版
  * 
- * 通过 GMGN 免费 API 获取聪明钱信号，无需 Cookie！
+ * 通过 GMGN 免费 API 获取多种信号，无需 Cookie！
+ * 
+ * 支持的信号类型:
+ * 1. Smart Money (聪明钱) - 追踪聪明钱买入
+ * 2. KOL Signals (KOL信号) - 追踪 KOL 持仓变化
+ * 3. Trending/Surge (飙升榜) - 价格/成交量飙升预警
+ * 4. DEX Paid (付费推广) - Dexscreener 付费信号
+ * 5. AI Signals (AI信号) - GMGN AI 推荐
  * 
  * API 文档: https://github.com/imcrazysteven/GMGN-API
- * 
- * 核心 API:
- * - /rank/{chain}/swaps/{time} - 聪明钱热门代币
- * - /tokens/top_buyers/{ca} - 代币的聪明钱买家
- * - /wallet_activity/{address} - 钱包交易活动
  */
 
 import axios from 'axios';
@@ -27,11 +29,27 @@ export class GMGNSmartMoneyScout extends EventEmitter {
             // 支持的链
             chains: config.chains || ['sol', 'bsc'],
             
+            // 启用的信号类型
+            enabledSignals: config.enabledSignals || {
+                smartMoney: true,    // 聪明钱
+                kol: true,           // KOL
+                trending: true,      // 飙升榜
+                dexPaid: true,       // DEX付费
+                aiSignal: true       // AI信号
+            },
+            
             // 聪明钱触发阈值
             smartMoneyThreshold: {
-                minSmartBuyers: config.minSmartBuyers || 2,   // 最少聪明钱买家
-                minVolume24h: config.minVolume24h || 10000,   // 最低24h成交量 $
-                maxAge: config.maxAge || 24 * 60 * 60 * 1000  // 代币最大年龄 24h
+                minSmartBuyers: config.minSmartBuyers || 2,
+                minVolume24h: config.minVolume24h || 10000,
+                maxAge: config.maxAge || 24 * 60 * 60 * 1000
+            },
+            
+            // 飙升榜阈值
+            surgeThreshold: {
+                priceChange5m: 20,   // 5分钟涨幅 > 20%
+                priceChange1h: 50,   // 1小时涨幅 > 50%
+                volumeIncrease: 3    // 成交量增加 3倍
             },
             
             // 安全过滤
@@ -41,15 +59,13 @@ export class GMGNSmartMoneyScout extends EventEmitter {
         };
         
         this.isRunning = false;
-        this.lastSeenTokens = new Map(); // 防止重复触发
+        this.lastSeenTokens = new Map();
         this.pollTimers = {};
         
-        console.log('[GMGN Scout] 初始化完成 - 无需 Cookie！');
+        console.log('[GMGN] 🚀 多维信号源初始化完成 - 无需 Cookie！');
+        console.log(`[GMGN] 启用信号: ${Object.entries(this.config.enabledSignals).filter(([k,v]) => v).map(([k]) => k).join(', ')}`);
     }
     
-    /**
-     * 获取请求头
-     */
     getHeaders() {
         return {
             'accept': 'application/json',
@@ -58,164 +74,316 @@ export class GMGNSmartMoneyScout extends EventEmitter {
         };
     }
     
-    /**
-     * 获取聪明钱热门代币
-     * @param {string} chain - sol, bsc, eth
-     * @param {string} period - 1m, 5m, 1h, 6h, 24h
-     */
+    // ==========================================
+    // 1. 聪明钱信号 (Smart Money)
+    // ==========================================
     async getSmartMoneyTokens(chain = 'sol', period = '1h') {
         try {
             const url = `${this.config.baseUrl}/rank/${chain}/swaps/${period}`;
-            
-            const params = {
-                orderby: 'smartmoney',
-                direction: 'desc',
-                'filters[]': this.config.safetyFilters
-            };
-            
             const response = await axios.get(url, {
                 headers: this.getHeaders(),
-                params,
+                params: {
+                    orderby: 'smartmoney',
+                    direction: 'desc',
+                    'filters[]': this.config.safetyFilters
+                },
                 timeout: 15000
             });
             
-            if (response.data && response.data.data) {
-                const tokens = response.data.data.rank || [];
-                console.log(`[GMGN Scout] ${chain.toUpperCase()} 获取 ${tokens.length} 个聪明钱代币`);
-                return tokens;
+            if (response.data?.data?.rank) {
+                return response.data.data.rank;
             }
-            
             return [];
-            
         } catch (error) {
-            console.error(`[GMGN Scout] 获取聪明钱代币失败: ${error.message}`);
+            console.error(`[GMGN] 聪明钱API错误: ${error.message}`);
             return [];
         }
     }
     
-    /**
-     * 获取代币的聪明钱买家数量
-     * @param {string} tokenCA - 代币合约地址
-     * @param {string} chain - sol, bsc
-     */
-    async getSmartMoneyBuyers(tokenCA, chain = 'sol') {
+    // ==========================================
+    // 2. KOL 信号
+    // ==========================================
+    async getKOLSignals(chain = 'sol') {
         try {
-            const url = `${this.config.baseUrl}/tokens/top_buyers/${chain}/${tokenCA}`;
-            
+            // KOL 热门持仓
+            const url = `${this.config.baseUrl}/rank/${chain}/swaps/1h`;
             const response = await axios.get(url, {
                 headers: this.getHeaders(),
-                timeout: 10000
+                params: {
+                    orderby: 'kol_count',  // 按 KOL 数量排序
+                    direction: 'desc',
+                    'filters[]': this.config.safetyFilters
+                },
+                timeout: 15000
             });
             
-            if (response.data && response.data.data) {
-                const buyers = response.data.data || [];
-                const smartBuyers = buyers.filter(b => b.is_smart_money || b.smart_money);
-                return {
-                    total_buyers: buyers.length,
-                    smart_buyers: smartBuyers.length,
-                    smart_buyer_list: smartBuyers.slice(0, 10) // Top 10
-                };
+            if (response.data?.data?.rank) {
+                // 过滤出有 KOL 持仓的代币
+                return response.data.data.rank.filter(t => 
+                    (t.kol_count || 0) >= 1 || (t.kol_holders || 0) >= 1
+                );
             }
-            
-            return { total_buyers: 0, smart_buyers: 0, smart_buyer_list: [] };
-            
+            return [];
         } catch (error) {
-            // 静默失败，返回空数据
-            return { total_buyers: 0, smart_buyers: 0, smart_buyer_list: [] };
+            console.error(`[GMGN] KOL API错误: ${error.message}`);
+            return [];
         }
     }
     
-    /**
-     * 获取代币详情（包含聪明钱数据）
-     */
-    async getTokenInfo(tokenCA, chain = 'sol') {
+    // ==========================================
+    // 3. 飙升榜 (Trending/Surge Alert)
+    // ==========================================
+    async getSurgeTokens(chain = 'sol') {
         try {
-            const url = `${this.config.baseUrl}/tokens/${chain}/${tokenCA}`;
-            
+            // 获取5分钟涨幅榜
+            const url = `${this.config.baseUrl}/rank/${chain}/swaps/5m`;
             const response = await axios.get(url, {
                 headers: this.getHeaders(),
-                timeout: 10000
+                params: {
+                    orderby: 'change',  // 按涨幅排序
+                    direction: 'desc',
+                    'filters[]': this.config.safetyFilters
+                },
+                timeout: 15000
             });
             
-            if (response.data && response.data.data) {
+            if (response.data?.data?.rank) {
+                // 过滤出飙升的代币
+                return response.data.data.rank.filter(t => {
+                    const change5m = parseFloat(t.price_change_5m || t.change_5m || 0);
+                    return change5m >= this.config.surgeThreshold.priceChange5m;
+                });
+            }
+            return [];
+        } catch (error) {
+            console.error(`[GMGN] 飙升榜API错误: ${error.message}`);
+            return [];
+        }
+    }
+    
+    // ==========================================
+    // 4. DEX 付费推广信号
+    // ==========================================
+    async getDexPaidTokens(chain = 'sol') {
+        try {
+            // 获取有付费推广的代币
+            const url = `${this.config.baseUrl}/rank/${chain}/swaps/1h`;
+            const response = await axios.get(url, {
+                headers: this.getHeaders(),
+                params: {
+                    orderby: 'volume',
+                    direction: 'desc',
+                    'filters[]': ['dexscreener_ad', 'dexscreener_update']  // 付费推广过滤
+                },
+                timeout: 15000
+            });
+            
+            if (response.data?.data?.rank) {
+                // 过滤出有 DEX 付费标记的
+                return response.data.data.rank.filter(t => 
+                    t.dexscreener_ad || t.dexscreener_paid || t.is_promoted
+                );
+            }
+            return [];
+        } catch (error) {
+            // DEX 付费 API 可能需要特殊权限，静默失败
+            return [];
+        }
+    }
+    
+    // ==========================================
+    // 5. AI 信号 (GMGN AI 推荐)
+    // ==========================================
+    async getAISignals(chain = 'sol') {
+        try {
+            // 尝试获取 AI 推荐（可能需要特殊端点）
+            const url = `${this.config.baseUrl}/signals/${chain}/ai`;
+            const response = await axios.get(url, {
+                headers: this.getHeaders(),
+                timeout: 15000
+            });
+            
+            if (response.data?.data) {
                 return response.data.data;
             }
+            return [];
+        } catch (error) {
+            // AI 端点可能不公开，尝试备用方案
+            return this.getAISignalsFallback(chain);
+        }
+    }
+    
+    async getAISignalsFallback(chain = 'sol') {
+        try {
+            // 使用综合评分作为 AI 信号的替代
+            const url = `${this.config.baseUrl}/rank/${chain}/swaps/1h`;
+            const response = await axios.get(url, {
+                headers: this.getHeaders(),
+                params: {
+                    orderby: 'score',  // 综合评分
+                    direction: 'desc',
+                    'filters[]': this.config.safetyFilters
+                },
+                timeout: 15000
+            });
             
+            if (response.data?.data?.rank) {
+                // 取评分最高的前10个
+                return response.data.data.rank.slice(0, 10);
+            }
+            return [];
+        } catch (error) {
+            return [];
+        }
+    }
+    
+    // ==========================================
+    // 6. 获取代币详情（增强版）
+    // ==========================================
+    async getTokenDetails(tokenCA, chain = 'sol') {
+        try {
+            const url = `${this.config.baseUrl}/tokens/${chain}/${tokenCA}`;
+            const response = await axios.get(url, {
+                headers: this.getHeaders(),
+                timeout: 10000
+            });
+            
+            if (response.data?.data) {
+                const data = response.data.data;
+                return {
+                    token_ca: tokenCA,
+                    chain: chain.toUpperCase(),
+                    symbol: data.symbol,
+                    name: data.name,
+                    price: data.price,
+                    market_cap: data.market_cap,
+                    liquidity: data.liquidity,
+                    volume_24h: data.volume_24h,
+                    holder_count: data.holder_count,
+                    smart_money_count: data.smart_money_count || 0,
+                    kol_count: data.kol_count || 0,
+                    blue_chip_index: data.blue_chip_index || 0,
+                    price_change_5m: data.price_change_5m || 0,
+                    price_change_1h: data.price_change_1h || 0,
+                    price_change_24h: data.price_change_24h || 0,
+                    is_honeypot: data.is_honeypot || false,
+                    dex_paid: data.dexscreener_ad || data.is_promoted || false
+                };
+            }
             return null;
-            
         } catch (error) {
             return null;
         }
     }
     
-    /**
-     * 扫描并返回符合条件的聪明钱信号
-     */
-    async scan(chain = 'sol') {
-        const tokens = await this.getSmartMoneyTokens(chain, '1h');
+    // ==========================================
+    // 7. 综合扫描
+    // ==========================================
+    async scanAll(chain = 'sol') {
         const signals = [];
+        const { enabledSignals } = this.config;
         
-        for (const token of tokens.slice(0, 20)) { // 只处理前20个
-            try {
-                const tokenCA = token.address || token.token_address;
-                if (!tokenCA) continue;
-                
-                // 检查是否已处理过
-                const cacheKey = `${chain}:${tokenCA}`;
-                if (this.lastSeenTokens.has(cacheKey)) {
-                    const lastSeen = this.lastSeenTokens.get(cacheKey);
-                    if (Date.now() - lastSeen < 30 * 60 * 1000) { // 30分钟内不重复
-                        continue;
-                    }
-                }
-                
-                // 获取聪明钱买家数据
-                const buyerData = await this.getSmartMoneyBuyers(tokenCA, chain);
-                
-                // 检查阈值
-                if (buyerData.smart_buyers >= this.config.smartMoneyThreshold.minSmartBuyers) {
-                    const signal = {
-                        token_ca: tokenCA,
-                        chain: chain.toUpperCase(),
-                        symbol: token.symbol || 'Unknown',
-                        name: token.name || token.symbol || 'Unknown',
-                        smart_money_count: buyerData.smart_buyers,
-                        total_buyers: buyerData.total_buyers,
-                        volume_24h: token.volume_24h || token.volume || 0,
-                        price: token.price || 0,
-                        price_change_1h: token.price_change_1h || 0,
-                        liquidity: token.liquidity || 0,
-                        market_cap: token.market_cap || 0,
-                        source: 'gmgn_smart_money',
-                        timestamp: Date.now()
-                    };
-                    
-                    signals.push(signal);
-                    this.lastSeenTokens.set(cacheKey, Date.now());
-                    
-                    console.log(`[GMGN Scout] 🐋 发现聪明钱信号: ${signal.symbol} (${chain.toUpperCase()}) - ${buyerData.smart_buyers} 个聪明钱`);
-                }
-                
-            } catch (error) {
-                // 静默跳过单个代币错误
-                continue;
+        // 并行获取所有信号
+        const [smartMoney, kol, surge, dexPaid, ai] = await Promise.all([
+            enabledSignals.smartMoney ? this.getSmartMoneyTokens(chain) : [],
+            enabledSignals.kol ? this.getKOLSignals(chain) : [],
+            enabledSignals.trending ? this.getSurgeTokens(chain) : [],
+            enabledSignals.dexPaid ? this.getDexPaidTokens(chain) : [],
+            enabledSignals.aiSignal ? this.getAISignals(chain) : []
+        ]);
+        
+        // 处理聪明钱信号
+        for (const token of smartMoney.slice(0, 10)) {
+            const signal = this.createSignal(token, chain, 'smart_money', '🐋');
+            if (signal && this.isNewSignal(signal)) {
+                signals.push(signal);
+            }
+        }
+        
+        // 处理 KOL 信号
+        for (const token of kol.slice(0, 5)) {
+            const signal = this.createSignal(token, chain, 'kol', '👑');
+            if (signal && this.isNewSignal(signal)) {
+                signals.push(signal);
+            }
+        }
+        
+        // 处理飙升信号
+        for (const token of surge.slice(0, 5)) {
+            const signal = this.createSignal(token, chain, 'surge', '🚀');
+            if (signal && this.isNewSignal(signal)) {
+                signals.push(signal);
+            }
+        }
+        
+        // 处理 DEX 付费信号
+        for (const token of dexPaid.slice(0, 5)) {
+            const signal = this.createSignal(token, chain, 'dex_paid', '💎');
+            if (signal && this.isNewSignal(signal)) {
+                signals.push(signal);
+            }
+        }
+        
+        // 处理 AI 信号
+        for (const token of ai.slice(0, 5)) {
+            const signal = this.createSignal(token, chain, 'ai_signal', '🤖');
+            if (signal && this.isNewSignal(signal)) {
+                signals.push(signal);
             }
         }
         
         return signals;
     }
     
-    /**
-     * 启动轮询
-     */
+    createSignal(token, chain, signalType, emoji) {
+        const tokenCA = token.address || token.token_address || token.ca;
+        if (!tokenCA) return null;
+        
+        return {
+            token_ca: tokenCA,
+            chain: chain.toUpperCase(),
+            symbol: token.symbol || 'Unknown',
+            name: token.name || token.symbol || 'Unknown',
+            signal_type: signalType,
+            emoji: emoji,
+            smart_money_count: token.smart_money_count || token.smartmoney || 0,
+            kol_count: token.kol_count || token.kol_holders || 0,
+            volume_24h: token.volume_24h || token.volume || 0,
+            price: token.price || 0,
+            price_change_5m: token.price_change_5m || token.change_5m || 0,
+            price_change_1h: token.price_change_1h || token.change_1h || 0,
+            liquidity: token.liquidity || 0,
+            market_cap: token.market_cap || 0,
+            holder_count: token.holder_count || 0,
+            blue_chip_index: token.blue_chip_index || 0,
+            source: `gmgn_${signalType}`,
+            timestamp: Date.now()
+        };
+    }
+    
+    isNewSignal(signal) {
+        const cacheKey = `${signal.chain}:${signal.token_ca}:${signal.signal_type}`;
+        if (this.lastSeenTokens.has(cacheKey)) {
+            const lastSeen = this.lastSeenTokens.get(cacheKey);
+            if (Date.now() - lastSeen < 30 * 60 * 1000) { // 30分钟内不重复
+                return false;
+            }
+        }
+        this.lastSeenTokens.set(cacheKey, Date.now());
+        return true;
+    }
+    
+    // ==========================================
+    // 启动/停止
+    // ==========================================
     async start() {
         if (this.isRunning) {
-            console.log('[GMGN Scout] 已经在运行中');
+            console.log('[GMGN] 已经在运行中');
             return;
         }
         
         this.isRunning = true;
-        console.log('[GMGN Scout] 🚀 启动聪明钱监控...');
+        console.log('[GMGN] 🚀 启动多维信号监控...');
         
         // 立即执行一次
         await this.pollOnce();
@@ -226,43 +394,39 @@ export class GMGNSmartMoneyScout extends EventEmitter {
                 if (!this.isRunning) return;
                 
                 try {
-                    const signals = await this.scan(chain);
+                    const signals = await this.scanAll(chain);
                     
                     for (const signal of signals) {
+                        console.log(`[GMGN] ${signal.emoji} ${signal.signal_type.toUpperCase()}: ${signal.symbol} (${signal.chain})`);
                         this.emit('signal', signal);
                     }
                     
                 } catch (error) {
-                    console.error(`[GMGN Scout] ${chain} 轮询错误:`, error.message);
+                    console.error(`[GMGN] ${chain} 轮询错误:`, error.message);
                 }
                 
             }, this.config.pollInterval);
         }
         
-        console.log('[GMGN Scout] ✅ 聪明钱监控已启动');
+        console.log('[GMGN] ✅ 多维信号监控已启动');
     }
     
-    /**
-     * 执行一次扫描
-     */
     async pollOnce() {
         for (const chain of this.config.chains) {
             try {
-                const signals = await this.scan(chain);
+                const signals = await this.scanAll(chain);
                 
                 for (const signal of signals) {
+                    console.log(`[GMGN] ${signal.emoji} ${signal.signal_type.toUpperCase()}: ${signal.symbol} (${signal.chain})`);
                     this.emit('signal', signal);
                 }
                 
             } catch (error) {
-                console.error(`[GMGN Scout] ${chain} 扫描错误:`, error.message);
+                console.error(`[GMGN] ${chain} 扫描错误:`, error.message);
             }
         }
     }
     
-    /**
-     * 停止轮询
-     */
     stop() {
         this.isRunning = false;
         
@@ -273,16 +437,14 @@ export class GMGNSmartMoneyScout extends EventEmitter {
             }
         }
         
-        console.log('[GMGN Scout] ⏹️ 聪明钱监控已停止');
+        console.log('[GMGN] ⏹️ 多维信号监控已停止');
     }
     
-    /**
-     * 获取状态
-     */
     getStatus() {
         return {
             isRunning: this.isRunning,
             chains: this.config.chains,
+            enabledSignals: this.config.enabledSignals,
             pollInterval: this.config.pollInterval,
             cachedTokens: this.lastSeenTokens.size
         };

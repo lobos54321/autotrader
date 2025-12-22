@@ -298,16 +298,26 @@ class SentimentArbitrageSystem {
       await this.positionMonitor.start();
       console.log('   ✅ Position monitor active\n');
 
-      // 2.5 Start GMGN Smart Money Scout (替代 DeBot - 无需 Cookie)
-      console.log('🐋 Starting GMGN Smart Money Scout...');
+      // 2.5 Start GMGN Multi-Signal Scout (替代 DeBot - 无需 Cookie)
+      console.log('🌐 Starting GMGN Multi-Signal Scout...');
       await this.gmgnScout.start();
-      // 监听 GMGN 聪明钱信号
+      // 监听 GMGN 多维信号
       this.gmgnScout.on('signal', (signal) => {
-        console.log(`\n🐋 [GMGN] 聪明钱信号: ${signal.symbol} (${signal.chain}) - ${signal.smart_money_count} 个聪明钱`);
+        const info = signal.signal_type === 'smart_money' ? `${signal.smart_money_count} 个聪明钱` :
+                     signal.signal_type === 'kol' ? `${signal.kol_count} 个KOL持仓` :
+                     signal.signal_type === 'surge' ? `5m涨幅 ${signal.price_change_5m}%` :
+                     signal.signal_type === 'dex_paid' ? 'DEX付费推广' :
+                     signal.signal_type === 'ai_signal' ? 'AI推荐' : '';
+        console.log(`\n${signal.emoji} [GMGN ${signal.signal_type.toUpperCase()}] ${signal.symbol} (${signal.chain}) - ${info}`);
         // 将信号写入数据库，由主循环处理
         this.injectSignal(signal);
       });
-      console.log('   ✅ GMGN Smart Money Scout active (无需 Cookie!)\n');
+      console.log('   ✅ GMGN Multi-Signal Scout active');
+      console.log('      - 🐋 Smart Money (聪明钱)');
+      console.log('      - 👑 KOL Signals (KOL信号)');
+      console.log('      - 🚀 Surge Alert (飙升榜)');
+      console.log('      - 💎 DEX Paid (付费推广)');
+      console.log('      - 🤖 AI Signals (AI信号)\n');
 
       // 2.6 Start Scout Engine (引擎 A - 聪明钱触发) - 可选
       if (process.env.SCOUT_ENABLED === 'true') {
