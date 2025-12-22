@@ -18,19 +18,19 @@ DexscreenerBoostAlerts,t.me/DexscreenerBoostAlerts,B,ACTIVE,1.7,0.23,Dexscreener
 gem1000xpump,t.me/gem1000xpump,B,ACTIVE,1.5,0.28,1000x gem pump calls
 wedegentheyaped,t.me/wedegentheyaped,B,ACTIVE,1.6,0.25,Degen ape calls
 nhn0x69420,t.me/nhn0x69420,B,ACTIVE,1.5,0.28,NHN signals
-狗狗的小聪明·BSC精选版,t.me/smartdog_bsc,B,INACTIVE,1.8,0.22,BSC smart dog - username invalid
+狗狗的小聪明·BSC精选版,t.me/smartdog_bsc,B,BLOCKED,1.8,0.22,BSC smart dog - username invalid
 Four.meme 早期提醒,t.me/fourmeme_alert,B,ACTIVE,1.7,0.23,Four.meme alerts
-社区监控,t.me/community_monitor,B,INACTIVE,1.6,0.25,Community monitor - username not found
-MadApesCalls,t.me/MadApesCalls,B,INACTIVE,1.7,0.24,Meme coin analysis - username invalid
+社区监控,t.me/community_monitor,B,BLOCKED,1.6,0.25,Community monitor - username not found
+MadApesCalls,t.me/MadApesCalls,B,BLOCKED,1.7,0.24,Meme coin analysis - username invalid
 FullSendGems,t.me/FullSendGems,B,ACTIVE,1.6,0.26,Premium gem signals
-CryptoGemsAlpha,t.me/CryptoGemsAlpha,B,INACTIVE,1.7,0.23,Multi-chain gems - username not found
+CryptoGemsAlpha,t.me/CryptoGemsAlpha,B,BLOCKED,1.7,0.23,Multi-chain gems - username not found
 SOLGemHunters,t.me/SOLGemHunters,B,ACTIVE,1.8,0.21,SOL gem hunters
-BSCGemAlerts,t.me/BSCGemAlerts,B,INACTIVE,1.6,0.25,BSC gem alerts - username invalid
+BSCGemAlerts,t.me/BSCGemAlerts,B,BLOCKED,1.6,0.25,BSC gem alerts - username invalid
 PumpFunAlerts,t.me/PumpFunAlerts,B,ACTIVE,1.5,0.28,Pump.fun new launches
 RaydiumAlerts,t.me/RaydiumAlerts,B,ACTIVE,1.7,0.22,Raydium new pairs
 # ===== Tier C - Lower Quality / High Noise =====
-DegenPlaysCN,t.me/DegenPlaysCN,C,INACTIVE,1.2,0.35,High risk degen plays - username not found
-MemeCoinsEarly,t.me/MemeCoinsEarly,C,INACTIVE,1.3,0.32,Early meme signals - username not found
+DegenPlaysCN,t.me/DegenPlaysCN,C,BLOCKED,1.2,0.35,High risk degen plays - username not found
+MemeCoinsEarly,t.me/MemeCoinsEarly,C,BLOCKED,1.3,0.32,Early meme signals - username not found
 SOLDegenAlerts,t.me/SOLDegenAlerts,C,ACTIVE,1.2,0.35,SOL degen alerts
-BSCNewTokens,t.me/BSCNewTokens,C,INACTIVE,1.1,0.38,BSC new token alerts - username invalid
-CryptoWhalesIO,t.me/CryptoWhalesIO,C,INACTIVE,1.4,0.30,Whale tracking - username invalid
+BSCNewTokens,t.me/BSCNewTokens,C,BLOCKED,1.1,0.38,BSC new token alerts - username invalid
+CryptoWhalesIO,t.me/CryptoWhalesIO,C,BLOCKED,1.4,0.30,Whale tracking - username invalid

@@ -67,9 +67,12 @@ async function loginSetup() {
     
     console.log('📱 正在打开 GMGN...');
     await page.goto('https://gmgn.ai/?chain=sol', { 
-        waitUntil: 'networkidle',
-        timeout: 60000 
+        waitUntil: 'load',
+        timeout: 120000 
     });
+    
+    // 额外等待页面渲染
+    await page.waitForTimeout(5000);
     
     console.log('');
     console.log('━'.repeat(60));
