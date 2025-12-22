@@ -32,7 +32,7 @@ export class PositionMonitorV2 {
     this.strategy = {
       // 止损（铁律）
       STOP_LOSS: -0.50, // -50% 止损
-      TIME_STOP_SOL_MINUTES: 60, // SOL 链 60分钟不涨就走
+      TIME_STOP_SOL_MINUTES: 45, // SOL 链 45分钟不涨就走（SOL快餐盘生命周期只有30分钟）
       TIME_STOP_BSC_MINUTES: 120, // BSC 链 2小时不涨就走
 
       // 翻倍出本（猎手思维）

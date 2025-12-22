@@ -33,6 +33,7 @@ import { ShadowPriceTracker } from './tracking/shadow-price-tracker.js';
 import { startDashboardServer } from './web/dashboard-server.js';
 import { RiskManager } from './risk/risk-manager.js';
 import { SmartMoneyTracker } from './tracking/smart-money-tracker.js';
+import { SmartMoneyScout } from './execution/smart-money-scout.js';
 
 dotenv.config();
 
@@ -63,6 +64,14 @@ class SentimentArbitrageSystem {
     
     // Smart Money Tracker - 聪明钱追踪
     this.smartMoneyTracker = new SmartMoneyTracker(this.config, this.softScorer.dynamicScoring);
+    
+    // Smart Money Scout - 引擎 A（独立聪明钱触发）
+    this.smartMoneyScout = new SmartMoneyScout(
+      this.config,
+      { SOL: this.solService, BSC: this.bscService },
+      this.executor,
+      this.db
+    );
     
     // Shadow Price Tracker - track prices in shadow mode for source evaluation
     this.shadowTracker = new ShadowPriceTracker(
@@ -280,6 +289,13 @@ class SentimentArbitrageSystem {
       console.log('📊 Starting position monitor...');
       await this.positionMonitor.start();
       console.log('   ✅ Position monitor active\n');
+
+      // 2.5 Start Scout Engine (引擎 A - 聪明钱触发)
+      if (this.config.SCOUT_ENABLED !== 'false') {
+        console.log('🔭 Starting Smart Money Scout (引擎 A)...');
+        await this.smartMoneyScout.start();
+        console.log('   ✅ Scout engine active\n');
+      }
 
       // 3. Start signal processing loop
       this.isRunning = true;

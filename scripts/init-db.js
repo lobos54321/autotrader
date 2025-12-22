@@ -368,6 +368,29 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_positions_token ON positions(token_ca);
 `);
 
+// Table 11: scout_positions (引擎 A - 聪明钱触发的仓位)
+db.exec(`
+  CREATE TABLE IF NOT EXISTS scout_positions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    token_ca TEXT NOT NULL,
+    chain TEXT NOT NULL,
+    entry_price REAL,
+    position_size REAL,
+    smart_wallet TEXT,
+    smart_money_amount REAL,
+    status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'active', 'shadow', 'closed', 'failed')),
+    confirmed INTEGER DEFAULT 0,
+    confirmed_at TEXT,
+    exit_price REAL,
+    exit_time TEXT,
+    pnl_percent REAL,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_scout_token ON scout_positions(token_ca);
+  CREATE INDEX IF NOT EXISTS idx_scout_status ON scout_positions(status);
+`);
+
 console.log('✅ Database schema created successfully');
 console.log(`📍 Database location: ${dbPath}`);
 
