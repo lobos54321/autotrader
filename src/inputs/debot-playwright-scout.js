@@ -250,6 +250,7 @@ export class DebotPlaywrightScout extends EventEmitter {
         const chain = token.chain === 'solana' ? 'SOL' : 
                      token.chain === 'bsc' ? 'BSC' : 
                      tokenAddress.startsWith('0x') ? 'BSC' : 'SOL';
+        const chainLower = chain === 'SOL' ? 'solana' : 'bsc';
         
         // 提取 market_info
         const marketInfo = token.market_info || {};
@@ -261,10 +262,21 @@ export class DebotPlaywrightScout extends EventEmitter {
         const liquidity = pairInfo.liquidity || 0;
         const isMintAbandoned = token.safe_info?.solana?.is_mint_abandoned === 1;
         
-        // 只有通过第一层漏斗的代币才调用 AI Report
+        // 并行获取额外数据（仅对高质量信号）
         let aiReport = null;
+        let tokenMetrics = null;
+        let tokenKline = null;
+        
         if (smartWalletOnline >= 2 && liquidity >= 10000) {
-            aiReport = await this.fetchAIReport(tokenAddress);
+            // 并行请求 AI Report、Metrics 和 Kline
+            const [aiRes, metricsRes, klineRes] = await Promise.all([
+                this.fetchAIReport(tokenAddress),
+                this.fetchTokenMetrics(tokenAddress, chainLower),
+                this.fetchTokenKline(tokenAddress, chainLower)
+            ]);
+            aiReport = aiRes;
+            tokenMetrics = metricsRes;
+            tokenKline = klineRes;
         }
         
         // 构建信号
@@ -292,19 +304,27 @@ export class DebotPlaywrightScout extends EventEmitter {
             activityScore: token.activity_score || 0,
             maxPriceGain: token.max_price_gain || 0,
             
-            // 市场数据
-            price: marketInfo.price || 0,
-            marketCap: marketInfo.mkt_cap || marketInfo.fdv || 0,
-            holders: marketInfo.holders || 0,
-            volume: marketInfo.volume || 0,
+            // 市场数据（优先使用 Metrics API 数据）
+            price: tokenMetrics?.price || marketInfo.price || 0,
+            marketCap: tokenMetrics?.mkt_cap || marketInfo.mkt_cap || marketInfo.fdv || 0,
+            holders: tokenMetrics?.holders || marketInfo.holders || 0,
+            volume: tokenMetrics?.volume_24h || marketInfo.volume || 0,
             buys: marketInfo.buys || 0,
             sells: marketInfo.sells || 0,
-            liquidity: liquidity,
+            liquidity: tokenMetrics?.liquidity || liquidity,
             
-            // 价格变化
+            // 价格变化（优先使用 Kline API 数据）
             priceChange5m: marketInfo.percent_5m || 0,
-            priceChange1h: marketInfo.percent_1h || 0,
-            priceChange24h: marketInfo.percent_24h || 0,
+            priceChange1h: tokenKline?.price_change_1h || marketInfo.percent_1h || 0,
+            priceChange24h: tokenKline?.price_change_24h || marketInfo.percent_24h || 0,
+            
+            // Metrics API 额外数据
+            buySellRatio: tokenMetrics?.buy_sell_ratio || null,
+            smartMoneyFlow: tokenMetrics?.smart_money_flow || null,
+            
+            // Kline API 数据
+            klineData: tokenKline?.kline || null,
+            klineCount: tokenKline?.kline?.length || 0,
             
             // 社交信息
             twitter: socialInfo.twitter || '',
@@ -328,25 +348,51 @@ export class DebotPlaywrightScout extends EventEmitter {
         // 打印完整信号信息 (让后台可见)
         const tierEmoji = signal.tokenTier === 'gold' ? '🥇' : 
                          signal.tokenTier === 'silver' ? '🥈' : '🔥';
-        console.log(`\n[DeBot Scout] ═══════════════════════════════════════════`);
-        console.log(`[DeBot Scout] ${tierEmoji} Rank代币: ${signal.symbol} (${tokenAddress})`);
-        console.log(`[DeBot Scout] ─────────────────────────────────────────────`);
+        console.log(`\n[DeBot Scout] ═══════════════════════════════════════════════════════════════`);
+        console.log(`[DeBot Scout] ${tierEmoji} HOT TOKEN: ${signal.symbol} (${signal.tokenName})`);
+        console.log(`[DeBot Scout] ─────────────────────────────────────────────────────────────────`);
+        console.log(`[DeBot Scout] 📍 地址: ${tokenAddress}`);
+        console.log(`[DeBot Scout] ⛓️  链: ${chain}`);
+        console.log(`[DeBot Scout] ─────────────────────────────────────────────────────────────────`);
         console.log(`[DeBot Scout] 🐋 聪明钱: ${signal.smart_wallet_online}在线 / ${signal.smart_wallet_total}总数`);
         console.log(`[DeBot Scout] 💰 市值: $${(signal.marketCap/1000).toFixed(1)}K | 流动性: $${(signal.liquidity/1000).toFixed(1)}K`);
-        console.log(`[DeBot Scout] 📈 价格变化: 5m ${(signal.priceChange5m*100).toFixed(1)}% | 1h ${(signal.priceChange1h*100).toFixed(1)}% | 24h ${(signal.priceChange24h*100).toFixed(1)}%`);
-        console.log(`[DeBot Scout] 👥 持有人: ${signal.holders} | 买卖: ${signal.buys}/${signal.sells}`);
-        console.log(`[DeBot Scout] 🏷️ 等级: ${signal.tokenTier || 'bronze'} | 活跃分: ${(signal.activityScore*100).toFixed(0)}%`);
-        console.log(`[DeBot Scout] 🔒 权限: ${signal.isMintAbandoned ? '已丢弃✅' : '未丢弃⚠️'}`);
-        if (signal.twitter) console.log(`[DeBot Scout] 🐦 Twitter: ${signal.twitter}`);
-        if (signal.description) console.log(`[DeBot Scout] 📝 描述: ${signal.description.slice(0, 80)}...`);
-        if (signal.aiScore) {
-            console.log(`[DeBot Scout] ─────────────────────────────────────────────`);
-            console.log(`[DeBot Scout] 🤖 AI评分: ${signal.aiScore}/10`);
-            console.log(`[DeBot Scout] 📖 叙事类型: ${signal.aiNarrativeType || 'Unknown'}`);
-            if (signal.aiNarrative) console.log(`[DeBot Scout] 💡 叙事: ${signal.aiNarrative.slice(0, 100)}...`);
-            if (signal.hasNegativeIncidents) console.log(`[DeBot Scout] ⚠️ 警告: 存在负面事件`);
+        console.log(`[DeBot Scout] 💵 价格: $${signal.price}`);
+        console.log(`[DeBot Scout] 📈 涨跌: 5m ${(signal.priceChange5m*100).toFixed(1)}% | 1h ${(signal.priceChange1h*100).toFixed(1)}% | 24h ${(signal.priceChange24h*100).toFixed(1)}%`);
+        console.log(`[DeBot Scout] 📊 24h交易量: $${(signal.volume/1000).toFixed(1)}K`);
+        console.log(`[DeBot Scout] 👥 持有人: ${signal.holders} | 买/卖: ${signal.buys}/${signal.sells}`);
+        console.log(`[DeBot Scout] 🏷️  等级: ${signal.tokenTier || 'bronze'} | 活跃分: ${(signal.activityScore*100).toFixed(0)}%`);
+        console.log(`[DeBot Scout] 📈 最大涨幅: ${signal.maxPriceGain.toFixed(1)}x`);
+        console.log(`[DeBot Scout] 🔒 Mint权限: ${signal.isMintAbandoned ? '已丢弃✅' : '未丢弃⚠️'}`);
+        
+        // Metrics API 额外数据
+        if (signal.buySellRatio !== null) {
+            console.log(`[DeBot Scout] ⚖️  买卖比: ${signal.buySellRatio.toFixed(2)}`);
         }
-        console.log(`[DeBot Scout] ═══════════════════════════════════════════\n`);
+        if (signal.smartMoneyFlow !== null) {
+            const flowEmoji = signal.smartMoneyFlow > 0 ? '🟢流入' : signal.smartMoneyFlow < 0 ? '🔴流出' : '⚪持平';
+            console.log(`[DeBot Scout] 💹 聪明钱流向: ${flowEmoji} $${Math.abs(signal.smartMoneyFlow).toFixed(0)}`);
+        }
+        
+        // Kline 数据
+        if (signal.klineCount > 0) {
+            console.log(`[DeBot Scout] 📉 K线数据: ${signal.klineCount}条`);
+        }
+        
+        // 社交信息
+        if (signal.twitter) console.log(`[DeBot Scout] 🐦 Twitter: ${signal.twitter}`);
+        if (signal.website) console.log(`[DeBot Scout] 🌐 Website: ${signal.website}`);
+        if (signal.description) console.log(`[DeBot Scout] 📝 描述: ${signal.description.slice(0, 100)}...`);
+        
+        // AI Report
+        if (signal.aiScore) {
+            console.log(`[DeBot Scout] ─────────────────────────────────────────────────────────────────`);
+            console.log(`[DeBot Scout] 🤖 AI叙事报告:`);
+            console.log(`[DeBot Scout]    评分: ${signal.aiScore}/10`);
+            console.log(`[DeBot Scout]    类型: ${signal.aiNarrativeType || 'Unknown'}`);
+            if (signal.aiNarrative) console.log(`[DeBot Scout]    叙事: ${signal.aiNarrative.slice(0, 100)}...`);
+            if (signal.hasNegativeIncidents) console.log(`[DeBot Scout]    ⚠️ 警告: 存在负面事件`);
+        }
+        console.log(`[DeBot Scout] ═══════════════════════════════════════════════════════════════\n`);
         
         // 发送信号
         this.emit('signal', signal);
@@ -391,9 +437,92 @@ export class DebotPlaywrightScout extends EventEmitter {
     }
     
     /**
+     * 获取代币详细指标
+     * API: GET https://debot.ai/api/community/signal/token/metrics?chain={CHAIN}&token={TOKEN_ADDRESS}
+     * 
+     * 返回数据包含：
+     * - price: 当前价格
+     * - holders: 持有人数
+     * - mkt_cap: 市值
+     * - volume_24h: 24小时交易量
+     * - liquidity: 流动性
+     * - buy_sell_ratio: 买卖比
+     * - smart_money_flow: 聪明钱流向
+     */
+    async fetchTokenMetrics(tokenAddress, chain = 'solana') {
+        try {
+            const url = `https://debot.ai/api/community/signal/token/metrics?chain=${chain}&token=${tokenAddress}`;
+            
+            const response = await this.page.evaluate(async (url) => {
+                try {
+                    const res = await fetch(url, {
+                        method: 'GET',
+                        headers: { 'Accept': 'application/json' },
+                        credentials: 'include'
+                    });
+                    if (!res.ok) return null;
+                    return await res.json();
+                } catch (e) {
+                    return null;
+                }
+            }, url);
+            
+            if (response?.code === 0 && response?.data) {
+                console.log(`[DeBot Scout] 📊 Token Metrics: ${tokenAddress.slice(0,8)}...`);
+                return response.data;
+            }
+            
+            return null;
+        } catch (error) {
+            console.log(`[DeBot Scout] ⚠️ Token Metrics 获取失败: ${error.message}`);
+            return null;
+        }
+    }
+    
+    /**
+     * 获取代币K线价格历史
+     * API: GET https://debot.ai/api/community/signal/channel/token/kline?chain={CHAIN}&token={TOKEN_ADDRESS}
+     * 
+     * 返回数据包含：
+     * - kline: K线数据数组 [{time, open, high, low, close, volume}]
+     * - price_change_1h: 1小时涨跌幅
+     * - price_change_24h: 24小时涨跌幅
+     */
+    async fetchTokenKline(tokenAddress, chain = 'solana') {
+        try {
+            const url = `https://debot.ai/api/community/signal/channel/token/kline?chain=${chain}&token=${tokenAddress}`;
+            
+            const response = await this.page.evaluate(async (url) => {
+                try {
+                    const res = await fetch(url, {
+                        method: 'GET',
+                        headers: { 'Accept': 'application/json' },
+                        credentials: 'include'
+                    });
+                    if (!res.ok) return null;
+                    return await res.json();
+                } catch (e) {
+                    return null;
+                }
+            }, url);
+            
+            if (response?.code === 0 && response?.data) {
+                const klineCount = response.data.kline?.length || 0;
+                console.log(`[DeBot Scout] 📈 Token Kline: ${tokenAddress.slice(0,8)}... (${klineCount} 条K线)`);
+                return response.data;
+            }
+            
+            return null;
+        } catch (error) {
+            console.log(`[DeBot Scout] ⚠️ Token Kline 获取失败: ${error.message}`);
+            return null;
+        }
+    }
+    
+    /**
      * 处理 heatmap API 的 signals 数据
      */
-    handleHeatmapSignals(signals) {
+    async handleHeatmapSignals(signals) {
         const tokenAddresses = Object.keys(signals);
         if (tokenAddresses.length === 0) return;
         
@@ -406,14 +535,25 @@ export class DebotPlaywrightScout extends EventEmitter {
             .slice(0, 20);
         
         for (const token of sortedTokens) {
-            this.processHeatmapSignal(token);
+            await this.processHeatmapSignal(token);
         }
     }
     
     /**
      * 处理单个 heatmap 信号
+     * 
+     * Heatmap API 原始数据格式:
+     * {
+     *   signal_count: 信号次数,
+     *   first_time: 首次信号时间戳,
+     *   first_price: 首次信号价格,
+     *   max_price: 最高价格,
+     *   max_price_gain: 最大涨幅倍数,
+     *   token_level: bronze/silver/gold,
+     *   signal_tags: 信号标签数组
+     * }
      */
-    processHeatmapSignal(token) {
+    async processHeatmapSignal(token) {
         const tokenAddress = token.address;
         if (!tokenAddress) return;
         
@@ -428,6 +568,27 @@ export class DebotPlaywrightScout extends EventEmitter {
         
         // 检测链 - SOL 地址通常不以 0x 开头，使用大写
         const chain = tokenAddress.startsWith('0x') ? 'BSC' : 'SOL';
+        const chainLower = chain === 'SOL' ? 'solana' : 'bsc';
+        
+        // 对高质量信号获取额外数据
+        let aiReport = null;
+        let tokenMetrics = null;
+        let tokenKline = null;
+        
+        const signalCount = token.signal_count || 0;
+        const maxPriceGain = token.max_price_gain || 0;
+        
+        // 信号次数>=5 或 涨幅>=3x 才获取详细数据
+        if (signalCount >= 5 || maxPriceGain >= 3) {
+            const [aiRes, metricsRes, klineRes] = await Promise.all([
+                this.fetchAIReport(tokenAddress),
+                this.fetchTokenMetrics(tokenAddress, chainLower),
+                this.fetchTokenKline(tokenAddress, chainLower)
+            ]);
+            aiReport = aiRes;
+            tokenMetrics = metricsRes;
+            tokenKline = klineRes;
+        }
         
         // 构建信号 - 使用 injectSignal 兼容的字段名
         const signal = {
@@ -443,13 +604,36 @@ export class DebotPlaywrightScout extends EventEmitter {
             tokenName: tokenAddress.slice(0, 8) + '...',
             
             // DeBot heatmap 特有数据
-            signalCount: token.signal_count || 0,
-            smart_money_count: token.signal_count || 0,  // 复用信号次数作为聪明钱数量
+            signalCount: signalCount,
+            smart_money_count: signalCount,  // 复用信号次数作为聪明钱数量
             firstTime: token.first_time || 0,
             firstPrice: token.first_price || 0,
             maxPrice: token.max_price || 0,
-            maxPriceGain: token.max_price_gain || 0,  // 🔥 最大涨幅倍数
+            maxPriceGain: maxPriceGain,  // 🔥 最大涨幅倍数
             tokenLevel: token.token_level || 'bronze', // bronze/silver/gold
+            signalTags: token.signal_tags || [],
+            
+            // Metrics API 数据（如果获取到）
+            price: tokenMetrics?.price || token.max_price || 0,
+            marketCap: tokenMetrics?.mkt_cap || 0,
+            holders: tokenMetrics?.holders || 0,
+            volume: tokenMetrics?.volume_24h || 0,
+            liquidity: tokenMetrics?.liquidity || 0,
+            buySellRatio: tokenMetrics?.buy_sell_ratio || null,
+            smartMoneyFlow: tokenMetrics?.smart_money_flow || null,
+            
+            // Kline API 数据
+            priceChange1h: tokenKline?.price_change_1h || 0,
+            priceChange24h: tokenKline?.price_change_24h || 0,
+            klineData: tokenKline?.kline || null,
+            klineCount: tokenKline?.kline?.length || 0,
+            
+            // AI Report 数据
+            aiReport: aiReport,
+            aiScore: aiReport?.rating?.score ? parseInt(aiReport.rating.score) : null,
+            aiNarrative: aiReport?.background?.origin?.text || null,
+            aiNarrativeType: aiReport?.narrative_type || null,
+            hasNegativeIncidents: aiReport?.distribution?.negative_incidents?.text ? true : false,
             
             timestamp: now,
             raw: token
@@ -458,16 +642,57 @@ export class DebotPlaywrightScout extends EventEmitter {
         // 打印完整信号信息 (让后台可见)
         const levelEmoji = signal.tokenLevel === 'gold' ? '🥇' : 
                           signal.tokenLevel === 'silver' ? '🥈' : '🥉';
-        console.log(`\n[DeBot Scout] ═══════════════════════════════════════════`);
-        console.log(`[DeBot Scout] ${levelEmoji} AI信号: ${tokenAddress}`);
-        console.log(`[DeBot Scout] ─────────────────────────────────────────────`);
+        console.log(`\n[DeBot Scout] ═══════════════════════════════════════════════════════════════`);
+        console.log(`[DeBot Scout] ${levelEmoji} AI SIGNAL: ${tokenAddress}`);
+        console.log(`[DeBot Scout] ─────────────────────────────────────────────────────────────────`);
+        console.log(`[DeBot Scout] ⛓️  链: ${chain}`);
+        console.log(`[DeBot Scout] 🏷️  等级: ${signal.tokenLevel}`);
         console.log(`[DeBot Scout] 📊 信号次数: ${signal.signalCount}`);
-        console.log(`[DeBot Scout] 📈 最高涨幅: ${signal.maxPriceGain.toFixed(1)}x`);
-        console.log(`[DeBot Scout] 💵 首次价格: $${signal.firstPrice.toFixed(10)}`);
-        console.log(`[DeBot Scout] 💰 最高价格: $${signal.maxPrice.toFixed(10)}`);
-        console.log(`[DeBot Scout] 🏷️ 等级: ${signal.tokenLevel}`);
-        console.log(`[DeBot Scout] ⏰ 首次时间: ${new Date(signal.firstTime * 1000).toISOString()}`);
-        console.log(`[DeBot Scout] ═══════════════════════════════════════════\n`);
+        console.log(`[DeBot Scout] 📈 最大涨幅: ${signal.maxPriceGain.toFixed(1)}x`);
+        console.log(`[DeBot Scout] 💵 首次价格: $${signal.firstPrice}`);
+        console.log(`[DeBot Scout] 💰 最高价格: $${signal.maxPrice}`);
+        console.log(`[DeBot Scout] ⏰ 首次时间: ${signal.firstTime ? new Date(signal.firstTime * 1000).toLocaleString() : 'N/A'}`);
+        if (signal.signalTags?.length > 0) {
+            console.log(`[DeBot Scout] 🏷️  标签: ${signal.signalTags.join(', ')}`);
+        }
+        
+        // Metrics 数据
+        if (tokenMetrics) {
+            console.log(`[DeBot Scout] ─────────────────────────────────────────────────────────────────`);
+            console.log(`[DeBot Scout] 📊 Token Metrics (详细指标):`);
+            console.log(`[DeBot Scout]    当前价格: $${signal.price}`);
+            console.log(`[DeBot Scout]    市值: $${(signal.marketCap/1000).toFixed(1)}K`);
+            console.log(`[DeBot Scout]    流动性: $${(signal.liquidity/1000).toFixed(1)}K`);
+            console.log(`[DeBot Scout]    持有人: ${signal.holders}`);
+            console.log(`[DeBot Scout]    24h交易量: $${(signal.volume/1000).toFixed(1)}K`);
+            if (signal.buySellRatio !== null) {
+                console.log(`[DeBot Scout]    买卖比: ${signal.buySellRatio.toFixed(2)}`);
+            }
+            if (signal.smartMoneyFlow !== null) {
+                const flowEmoji = signal.smartMoneyFlow > 0 ? '🟢流入' : signal.smartMoneyFlow < 0 ? '🔴流出' : '⚪持平';
+                console.log(`[DeBot Scout]    聪明钱流向: ${flowEmoji} $${Math.abs(signal.smartMoneyFlow).toFixed(0)}`);
+            }
+        }
+        
+        // Kline 数据
+        if (tokenKline) {
+            console.log(`[DeBot Scout] ─────────────────────────────────────────────────────────────────`);
+            console.log(`[DeBot Scout] 📈 Token Kline (K线数据):`);
+            console.log(`[DeBot Scout]    1h涨跌: ${(signal.priceChange1h*100).toFixed(1)}%`);
+            console.log(`[DeBot Scout]    24h涨跌: ${(signal.priceChange24h*100).toFixed(1)}%`);
+            console.log(`[DeBot Scout]    K线条数: ${signal.klineCount}`);
+        }
+        
+        // AI Report
+        if (signal.aiScore) {
+            console.log(`[DeBot Scout] ─────────────────────────────────────────────────────────────────`);
+            console.log(`[DeBot Scout] 🤖 AI叙事报告:`);
+            console.log(`[DeBot Scout]    评分: ${signal.aiScore}/10`);
+            console.log(`[DeBot Scout]    类型: ${signal.aiNarrativeType || 'Unknown'}`);
+            if (signal.aiNarrative) console.log(`[DeBot Scout]    叙事: ${signal.aiNarrative.slice(0, 100)}...`);
+            if (signal.hasNegativeIncidents) console.log(`[DeBot Scout]    ⚠️ 警告: 存在负面事件`);
+        }
+        console.log(`[DeBot Scout] ═══════════════════════════════════════════════════════════════\n`);
         
         // 发送所有信号，不做过滤
         this.emit('signal', signal);
