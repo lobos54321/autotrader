@@ -272,20 +272,14 @@ export class DebotPlaywrightScout extends EventEmitter {
             raw: token
         };
         
-        // 根据 token_level 和涨幅判断质量
+        // 打印信号信息
         const levelEmoji = signal.tokenLevel === 'gold' ? '🥇' : 
                           signal.tokenLevel === 'silver' ? '🥈' : '🥉';
+        console.log(`[DeBot Scout] ${levelEmoji} AI信号: ${tokenAddress.slice(0, 12)}...`);
+        console.log(`   📊 ${signal.signalCount}次信号, 最高涨幅 ${signal.maxPriceGain.toFixed(1)}x`);
         
-        // 只打印有意义的信号 (signal_count >= 3 或 max_price_gain >= 3)
-        if (signal.signalCount >= 3 || signal.maxPriceGain >= 3) {
-            console.log(`[DeBot Scout] ${levelEmoji} AI信号: ${tokenAddress.slice(0, 12)}...`);
-            console.log(`   📊 ${signal.signalCount}次信号, 最高涨幅 ${signal.maxPriceGain.toFixed(1)}x`);
-        }
-        
-        // 只发送有价值的信号
-        if (signal.signalCount >= 5 || signal.maxPriceGain >= 5 || signal.tokenLevel === 'gold') {
-            this.emit('signal', signal);
-        }
+        // 发送所有信号，不做过滤
+        this.emit('signal', signal);
     }
     
     /**
