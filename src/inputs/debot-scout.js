@@ -32,7 +32,7 @@ class DeBotScout extends EventEmitter {
             userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36',
             
             // 轮询间隔（毫秒）
-            pollInterval: 15000, // 15秒
+            pollInterval: 5000, // 5秒 - 快速捕获新信号
             
             // 支持的链
             chains: ['solana', 'bsc']

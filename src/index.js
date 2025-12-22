@@ -38,7 +38,7 @@ import { DexScreenerScout } from './inputs/dexscreener-scout.js';
 import { GMGNPlaywrightScout } from './inputs/gmgn-playwright-scout.js';
 import { DebotPlaywrightScout } from './inputs/debot-playwright-scout.js';
 import debotScout from './inputs/debot-scout.js';
-import { CrossValidator } from './decision/cross-validator.js';
+import { CrossValidator } from './engines/cross-validator.js';
 
 dotenv.config();
 
@@ -101,7 +101,7 @@ class SentimentArbitrageSystem {
     this.debotApiScout = debotScout;
     
     // Cross Validator - 交叉验证系统 (DeBot主力 + TG辅助)
-    this.crossValidator = new CrossValidator(this.db);
+    this.crossValidator = new CrossValidator();
     
     // Shadow Price Tracker - track prices in shadow mode for source evaluation
     this.shadowTracker = new ShadowPriceTracker(
@@ -389,43 +389,53 @@ class SentimentArbitrageSystem {
       if (process.env.DEBOT_API_ENABLED === 'true') {
         console.log('🎯 Starting DeBot API Scout (主力信号源)...');
         
+        // 初始化交叉验证器
+        this.crossValidator.start();
+        
         // 启动 DeBot Scout
         this.debotApiScout.start();
         
-        // 监听热门代币信号
-        this.debotApiScout.on('hot-token', async (token) => {
-          console.log(`\n🔥 [DeBot] 热门代币: ${token.symbol} (${token.chain})`);
-          console.log(`   聪明钱: ${token.smartWalletOnline}/${token.smartWalletTotal}`);
-          console.log(`   流动性: $${(token.liquidity || 0).toLocaleString()}`);
+        // 监听交叉验证器的验证信号
+        this.crossValidator.on('validated-signal', async (result) => {
+          const { token, score, decision } = result;
           
-          // 通过交叉验证器处理
-          const decision = await this.crossValidator.validate(token);
+          console.log(`\n🎯 [CrossValidator] 验证通过: ${token.symbol}`);
+          console.log(`   评分: ${score.total}/100`);
+          console.log(`   决策: ${decision.action} (${decision.tier})`);
+          console.log(`   仓位: ${decision.position} SOL`);
           
           // 如果决策是买入，注入信号
-          if (decision.action.startsWith('BUY')) {
-            this.injectValidatedSignal(decision);
+          if (decision.action === 'BUY') {
+            this.injectValidatedSignal({
+              token: {
+                address: token.tokenAddress,
+                symbol: token.symbol,
+                chain: token.chain
+              },
+              action: decision.tier === 'MAX' ? 'BUY_MAX' : 
+                      decision.tier === 'TREND' ? 'BUY_NORMAL' : 'BUY_SMALL',
+              rating: decision.tier,
+              positionSize: decision.position,
+              reasons: [decision.reason],
+              validation: {
+                smartMoney: {
+                  online: token.smartWalletOnline || 0,
+                  total: token.smartWalletTotal || 0
+                },
+                aiScore: result.aiReport?.rating?.score || 0,
+                tgHeat: {
+                  count: result.tgHeat?.mentionCount || 0
+                }
+              }
+            });
           }
         });
         
-        // 监听 AI 信号
-        this.debotApiScout.on('hunter-signal', async (signal) => {
-          console.log(`\n🎯 [DeBot] AI信号: ${signal.tokenAddress.slice(0, 8)}... (${signal.chain})`);
-          console.log(`   等级: ${signal.tokenLevel}`);
-          console.log(`   信号次数: ${signal.signalCount}`);
-          
-          // 通过交叉验证器处理
-          const decision = await this.crossValidator.validate(signal);
-          
-          // 如果决策是买入，注入信号
-          if (decision.action.startsWith('BUY')) {
-            this.injectValidatedSignal(decision);
-          }
-        });
-        
-        console.log('   ✅ DeBot API Scout active');
+        console.log('   ✅ DeBot API Scout + CrossValidator active');
         console.log('      - 🔥 Hot Tokens (热门代币)');
         console.log('      - 🎯 AI Signals (AI信号)');
-        console.log('      - 📊 Cross Validation (交叉验证)\n');
+        console.log('      - 📊 Cross Validation (交叉验证)');
+        console.log('      - 🧮 Scoring: 聪明钱40% + AI叙事30% + TG共识20% + 安全10%\n');
       }
 
       // 3. Start signal processing loop
