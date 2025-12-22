@@ -201,12 +201,12 @@ Return ONLY the JSON.
       // Token usage for cost tracking
       data.tokens_used = result.usage ? result.usage.total_tokens : 0;
 
-      console.log(`✅ Grok Twitter search: ${query} - ${data.mention_count} mentions, ${data.engagement} engagement`);
+      console.log(`✅ Grok Twitter search: $${tokenSymbol} - ${data.mention_count} mentions, ${data.engagement?.total_likes || 0} engagement`);
 
       return data;
 
     } catch (error) {
-      console.error(`❌ Grok Twitter search failed for ${query}:`, error.message);
+      console.error(`❌ Grok Twitter search failed for $${tokenSymbol}:`, error.message);
       throw error;
     }
   }

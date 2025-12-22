@@ -244,18 +244,24 @@ export class DebotPlaywrightScout extends EventEmitter {
         this.lastSeenTokens.set(cacheKey, now);
         
         // 检测链 - SOL 地址通常不以 0x 开头
-        const chain = tokenAddress.startsWith('0x') ? 'BSC' : 'SOL';
+        const chain = tokenAddress.startsWith('0x') ? 'bsc' : 'sol';
         
-        // 构建信号
+        // 构建信号 - 使用 injectSignal 兼容的字段名
         const signal = {
             source: 'DeBot_AI',
             type: 'AI_SIGNAL',
+            emoji: token.token_level === 'gold' ? '🥇' : 
+                   token.token_level === 'silver' ? '🥈' : '🥉',
+            action: 'buy',
             chain: chain,
+            token_ca: tokenAddress,  // injectSignal 期望的字段名
             tokenAddress: tokenAddress,
+            symbol: tokenAddress.slice(0, 8) + '...',
             tokenName: tokenAddress.slice(0, 8) + '...',
             
             // DeBot heatmap 特有数据
             signalCount: token.signal_count || 0,
+            smart_money_count: token.signal_count || 0,  // 复用信号次数作为聪明钱数量
             firstTime: token.first_time || 0,
             firstPrice: token.first_price || 0,
             maxPrice: token.max_price || 0,
@@ -276,8 +282,10 @@ export class DebotPlaywrightScout extends EventEmitter {
             console.log(`   📊 ${signal.signalCount}次信号, 最高涨幅 ${signal.maxPriceGain.toFixed(1)}x`);
         }
         
-        // 发送信号
-        this.emit('signal', signal);
+        // 只发送有价值的信号
+        if (signal.signalCount >= 5 || signal.maxPriceGain >= 5 || signal.tokenLevel === 'gold') {
+            this.emit('signal', signal);
+        }
     }
     
     /**
@@ -303,15 +311,25 @@ export class DebotPlaywrightScout extends EventEmitter {
         }
         this.lastSeenTokens.set(tokenAddress, Date.now());
         
-        // 提取信号详情
+        // 检测链
+        const chain = (item.chain || 'sol').toLowerCase();
+        const normalizedChain = chain.includes('bsc') || chain.includes('bnb') ? 'bsc' : 
+                                chain.includes('sol') || chain.includes('solana') ? 'sol' : chain;
+        
+        // 提取信号详情 - 使用 injectSignal 期望的字段名
         const signal = {
             source: 'DeBot',
             type: 'AI_SIGNAL',
-            chain: item.chain || 'sol',
+            emoji: '🤖',
+            action: 'buy',
+            chain: normalizedChain,
+            token_ca: tokenAddress,  // injectSignal 期望的字段名
             tokenAddress: tokenAddress,
+            symbol: item.name || item.symbol || item.token_name || 'Unknown',
             tokenName: item.name || item.symbol || item.token_name || 'Unknown',
             
             // DeBot 特有的丰富数据
+            smart_money_count: item.smart_money_count || item.smartMoneyCount || item.whale_count || 0,
             smartMoneyCount: item.smart_money_count || item.smartMoneyCount || item.whale_count || 0,
             avgBuyAmount: item.avg_buy_amount || item.avgBuyAmount || 0,
             marketCap: item.market_cap || item.marketCap || item.mc || 0,
@@ -326,13 +344,15 @@ export class DebotPlaywrightScout extends EventEmitter {
             raw: item
         };
         
-        // 打印发现的信号
-        console.log(`[DeBot Scout] 🔔 AI信号: ${signal.tokenName} (${tokenAddress.slice(0, 8)}...)`);
-        console.log(`   💰 ${signal.smartMoneyCount}个聪明钱包买入, 平均$${signal.avgBuyAmount}`);
-        console.log(`   📊 市值: $${signal.marketCap}, 池子: $${signal.liquidity}`);
-        
-        // 发送信号
-        this.emit('signal', signal);
+        // 只有有效的信号才打印和发送 (有聪明钱数据或有意义的数据)
+        if (signal.smartMoneyCount > 0 || signal.marketCap > 0) {
+            console.log(`[DeBot Scout] 🔔 AI信号: ${signal.symbol} (${tokenAddress.slice(0, 8)}...)`);
+            console.log(`   💰 ${signal.smartMoneyCount}个聪明钱包买入, 平均$${signal.avgBuyAmount}`);
+            console.log(`   📊 市值: $${signal.marketCap}, 池子: $${signal.liquidity}`);
+            
+            // 发送信号
+            this.emit('signal', signal);
+        }
     }
     
     /**
