@@ -36,6 +36,7 @@ import { SmartMoneyTracker } from './tracking/smart-money-tracker.js';
 import { SmartMoneyScout } from './execution/smart-money-scout.js';
 import { DexScreenerScout } from './inputs/dexscreener-scout.js';
 import { GMGNPlaywrightScout } from './inputs/gmgn-playwright-scout.js';
+import { DebotPlaywrightScout } from './inputs/debot-playwright-scout.js';
 
 dotenv.config();
 
@@ -85,6 +86,12 @@ class SentimentArbitrageSystem {
     // GMGN Playwright Scout - 聪明钱/KOL 信号源（使用 Playwright 拦截）
     this.gmgnScout = new GMGNPlaywrightScout({
       chains: ['sol'],
+      headless: process.env.NODE_ENV === 'production'
+    });
+    
+    // DeBot Playwright Scout - 聪明钱追踪
+    this.debotScout = new DebotPlaywrightScout({
+      chains: ['sol', 'bsc'],
       headless: process.env.NODE_ENV === 'production'
     });
     
@@ -342,7 +349,28 @@ class SentimentArbitrageSystem {
         }
       }
 
-      // 2.7 Start Legacy Scout Engine (可选)
+      // 2.7 Start DeBot Playwright Scout (聪明钱追踪)
+      if (process.env.DEBOT_ENABLED === 'true') {
+        console.log('🕵️ Starting DeBot Playwright Scout...');
+        
+        if (!this.debotScout.hasSession()) {
+          console.log('   ⚠️ 未找到 DeBot Session!');
+          console.log('   请先运行: node scripts/debot-login-setup.js');
+          console.log('   跳过 DeBot Scout\n');
+        } else {
+          await this.debotScout.start();
+          this.debotScout.on('signal', (signal) => {
+            const action = signal.action === 'buy' ? '买入' : '卖出';
+            console.log(`\n${signal.emoji} [DeBot] 聪明钱${action}: ${signal.symbol} (${signal.chain})`);
+            this.injectSignal(signal);
+          });
+          console.log('   ✅ DeBot Scout active');
+          console.log('      - 🟢 Smart Money Buy (聪明钱买入)');
+          console.log('      - 🔴 Smart Money Sell (聪明钱卖出)\n');
+        }
+      }
+
+      // 2.8 Start Legacy Scout Engine (可选)
       if (process.env.SCOUT_ENABLED === 'true') {
         console.log('🔭 Starting Legacy Smart Money Scout...');
         await this.smartMoneyScout.start();
