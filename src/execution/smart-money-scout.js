@@ -69,7 +69,7 @@ export class SmartMoneyScout {
     
     // 初始化组件
     this.smartMoneyTracker = new SmartMoneyTracker(config, null);
-    this.hardGate = new HardGate(chainProviders, config);
+    this.hardGate = new HardGateFilter(chainProviders, config);
     
     // 状态管理
     this.activeScouts = new Map();  // tokenCA -> scoutPosition
