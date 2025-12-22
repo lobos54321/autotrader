@@ -37,6 +37,8 @@ import { SmartMoneyScout } from './execution/smart-money-scout.js';
 import { DexScreenerScout } from './inputs/dexscreener-scout.js';
 import { GMGNPlaywrightScout } from './inputs/gmgn-playwright-scout.js';
 import { DebotPlaywrightScout } from './inputs/debot-playwright-scout.js';
+import debotScout from './inputs/debot-scout.js';
+import { CrossValidator } from './decision/cross-validator.js';
 
 dotenv.config();
 
@@ -94,6 +96,12 @@ class SentimentArbitrageSystem {
       chains: ['sol', 'bsc'],
       headless: process.env.NODE_ENV === 'production'
     });
+    
+    // DeBot API Scout - 主力信号源 (API 模式，更稳定)
+    this.debotApiScout = debotScout;
+    
+    // Cross Validator - 交叉验证系统 (DeBot主力 + TG辅助)
+    this.crossValidator = new CrossValidator(this.db);
     
     // Shadow Price Tracker - track prices in shadow mode for source evaluation
     this.shadowTracker = new ShadowPriceTracker(
@@ -375,6 +383,49 @@ class SentimentArbitrageSystem {
         console.log('🔭 Starting Legacy Smart Money Scout...');
         await this.smartMoneyScout.start();
         console.log('   ✅ Legacy Scout engine active\n');
+      }
+
+      // 2.9 Start DeBot API Scout (主力信号源 - 推荐)
+      if (process.env.DEBOT_API_ENABLED === 'true') {
+        console.log('🎯 Starting DeBot API Scout (主力信号源)...');
+        
+        // 启动 DeBot Scout
+        this.debotApiScout.start();
+        
+        // 监听热门代币信号
+        this.debotApiScout.on('hot-token', async (token) => {
+          console.log(`\n🔥 [DeBot] 热门代币: ${token.symbol} (${token.chain})`);
+          console.log(`   聪明钱: ${token.smartWalletOnline}/${token.smartWalletTotal}`);
+          console.log(`   流动性: $${(token.liquidity || 0).toLocaleString()}`);
+          
+          // 通过交叉验证器处理
+          const decision = await this.crossValidator.validate(token);
+          
+          // 如果决策是买入，注入信号
+          if (decision.action.startsWith('BUY')) {
+            this.injectValidatedSignal(decision);
+          }
+        });
+        
+        // 监听 AI 信号
+        this.debotApiScout.on('hunter-signal', async (signal) => {
+          console.log(`\n🎯 [DeBot] AI信号: ${signal.tokenAddress.slice(0, 8)}... (${signal.chain})`);
+          console.log(`   等级: ${signal.tokenLevel}`);
+          console.log(`   信号次数: ${signal.signalCount}`);
+          
+          // 通过交叉验证器处理
+          const decision = await this.crossValidator.validate(signal);
+          
+          // 如果决策是买入，注入信号
+          if (decision.action.startsWith('BUY')) {
+            this.injectValidatedSignal(decision);
+          }
+        });
+        
+        console.log('   ✅ DeBot API Scout active');
+        console.log('      - 🔥 Hot Tokens (热门代币)');
+        console.log('      - 🎯 AI Signals (AI信号)');
+        console.log('      - 📊 Cross Validation (交叉验证)\n');
       }
 
       // 3. Start signal processing loop
@@ -1143,6 +1194,70 @@ class SentimentArbitrageSystem {
       
     } catch (error) {
       console.error('❌ Inject signal error:', error.message);
+    }
+  }
+
+  /**
+   * Inject validated signal from CrossValidator
+   * 已经过交叉验证的信号，直接进入执行流程
+   */
+  injectValidatedSignal(decision) {
+    try {
+      const token = decision.token;
+      
+      // 检查是否已存在（15分钟内）
+      const existing = this.db.prepare(`
+        SELECT id FROM telegram_signals 
+        WHERE token_ca = ? AND chain = ? 
+        AND created_at > ?
+      `).get(
+        token.address, 
+        token.chain,
+        Math.floor(Date.now() / 1000) - 900  // 15分钟
+      );
+      
+      if (existing) {
+        console.log(`   ⏭️ 信号已存在，跳过: ${token.symbol}`);
+        return;
+      }
+      
+      // 根据决策类型设置频道名称
+      const channelName = decision.action === 'BUY_MAX' ? 'DeBot_S_Signal' :
+                          decision.action === 'BUY_NORMAL' ? 'DeBot_A_Signal' :
+                          decision.action === 'BUY_SMALL' ? 'DeBot_Scout' : 'DeBot_Signal';
+      
+      // 构建消息文本
+      const messageText = [
+        `${decision.action === 'BUY_MAX' ? '🚀' : decision.action === 'BUY_NORMAL' ? '✅' : '🐦'} DeBot 验证信号`,
+        `代币: ${token.symbol}`,
+        `评级: ${decision.rating}`,
+        `仓位: ${decision.positionSize} SOL`,
+        `聪明钱: ${decision.validation.smartMoney.online}/${decision.validation.smartMoney.total}`,
+        `AI评分: ${decision.validation.aiScore}/10`,
+        `TG热度: ${decision.validation.tgHeat.count}次提及`,
+        `理由: ${decision.reasons.slice(0, 2).join('; ')}`
+      ].join('\n');
+      
+      // 插入信号
+      this.db.prepare(`
+        INSERT INTO telegram_signals (
+          token_ca, chain, channel_name, channel_username,
+          message_text, timestamp, created_at, processed
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 0)
+      `).run(
+        token.address,
+        token.chain,
+        channelName,
+        '@debot_validated',
+        messageText,
+        new Date().toISOString(),
+        Math.floor(Date.now() / 1000)
+      );
+      
+      console.log(`   ✅ DeBot验证信号已注入: ${token.symbol} (${decision.rating}级, ${decision.positionSize} SOL)`);
+      
+    } catch (error) {
+      console.error('❌ Inject validated signal error:', error.message);
     }
   }
 
