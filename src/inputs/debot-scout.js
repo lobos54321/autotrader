@@ -24,13 +24,18 @@ class DeBotScout extends EventEmitter {
             userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36',
             
             // 轮询间隔（毫秒）
-            pollInterval: 10000, // 10秒
+            pollInterval: 15000, // 15秒（防止 Cloudflare 限流）
             
             // 聪明钱触发阈值
             smartMoneyThreshold: {
                 online: 2,   // 实时聪明钱 >= 2 触发
-                total: 5     // 累计聪明钱 >= 5 加分
+                total: 5,    // 累计聪明钱 >= 5 加分
+                // Tag Boost: 强叙事标签时，1个聪明钱也可触发
+                boostTags: ['binance_alpha', 'binance_exclusive']
             },
+            
+            // 时效性检查（秒）
+            maxTokenAge: 24 * 60 * 60, // 代币创建时间 < 24小时
             
             // 支持的链
             chains: ['sol', 'bsc']
@@ -181,9 +186,24 @@ class DeBotScout extends EventEmitter {
      * 检查是否为有效的猎手信号
      */
     isValidHunterSignal(signal) {
-        // 1. 聪明钱阈值检查
-        if (signal.smartMoney.online < this.config.smartMoneyThreshold.online) {
-            return { valid: false, reason: `聪明钱不足: ${signal.smartMoney.online} < ${this.config.smartMoneyThreshold.online}` };
+        // 0. 时效性检查（代币必须是新的）
+        if (signal.creationTime) {
+            const tokenAgeSeconds = (Date.now() - signal.creationTime) / 1000;
+            if (tokenAgeSeconds > this.config.maxTokenAge) {
+                return { valid: false, reason: `代币过老: ${(tokenAgeSeconds / 3600).toFixed(1)}小时 > 24小时` };
+            }
+        }
+        
+        // 1. 聪明钱阈值检查（支持 Tag Boost）
+        const hasBoostTag = signal.tags.some(tag => 
+            this.config.smartMoneyThreshold.boostTags.includes(tag)
+        );
+        
+        // Tag Boost: 强叙事标签时，1个聪明钱也可触发
+        const requiredOnline = hasBoostTag ? 1 : this.config.smartMoneyThreshold.online;
+        
+        if (signal.smartMoney.online < requiredOnline) {
+            return { valid: false, reason: `聪明钱不足: ${signal.smartMoney.online} < ${requiredOnline}${hasBoostTag ? ' (有Boost标签)' : ''}` };
         }
         
         // 2. 蜜罐检查（一票否决）
@@ -206,6 +226,11 @@ class DeBotScout extends EventEmitter {
         // 5. 权限检查（BSC 必须弃权）
         if (signal.chain === 'BSC' && !signal.security.isOwnershipAbandoned) {
             return { valid: false, reason: '权限未弃: BSC 需要 Ownership Abandoned' };
+        }
+        
+        // 6. Tag Boost 加成提示
+        if (hasBoostTag) {
+            return { valid: true, reason: `PASS (Tag Boost: ${signal.tags.filter(t => this.config.smartMoneyThreshold.boostTags.includes(t)).join(', ')})` };
         }
         
         return { valid: true, reason: 'PASS' };
