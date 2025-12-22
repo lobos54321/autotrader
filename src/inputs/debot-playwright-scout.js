@@ -87,8 +87,8 @@ export class DebotPlaywrightScout extends EventEmitter {
             this.setupNetworkInterceptor();
             
             // 访问 DeBot 聪明钱页面
-            console.log('[DeBot Scout] 正在加载 DeBot 聪明钱页面...');
-            await this.page.goto('https://debot.ai/smart-money', {
+            console.log('[DeBot Scout] 正在加载 DeBot SOL 页面...');
+            await this.page.goto('https://debot.ai/?chain=solana', {
                 waitUntil: 'load',
                 timeout: 60000
             });
@@ -240,15 +240,15 @@ export class DebotPlaywrightScout extends EventEmitter {
             if (!this.isRunning) return;
             
             try {
-                // 轮换不同链
+                // 轮换 SOL 和 BSC
                 const pages = [
-                    'https://debot.ai/smart-money?chain=sol',
-                    'https://debot.ai/smart-money?chain=bsc',
+                    'https://debot.ai/?chain=solana',
+                    'https://debot.ai/?chain=bsc',
                 ];
                 const randomPage = pages[Math.floor(Math.random() * pages.length)];
                 const chain = randomPage.includes('bsc') ? 'BSC' : 'SOL';
                 
-                console.log(`[DeBot Scout] 🔄 切换到 ${chain} 聪明钱`);
+                console.log(`[DeBot Scout] 🔄 切换到 ${chain}`);
                 await this.page.goto(randomPage, { 
                     waitUntil: 'load',
                     timeout: 60000
