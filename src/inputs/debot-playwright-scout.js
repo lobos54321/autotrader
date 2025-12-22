@@ -570,25 +570,15 @@ export class DebotPlaywrightScout extends EventEmitter {
         const chain = tokenAddress.startsWith('0x') ? 'BSC' : 'SOL';
         const chainLower = chain === 'SOL' ? 'solana' : 'bsc';
         
-        // 对高质量信号获取额外数据
-        let aiReport = null;
-        let tokenMetrics = null;
-        let tokenKline = null;
-        
         const signalCount = token.signal_count || 0;
         const maxPriceGain = token.max_price_gain || 0;
         
-        // 信号次数>=5 或 涨幅>=3x 才获取详细数据
-        if (signalCount >= 5 || maxPriceGain >= 3) {
-            const [aiRes, metricsRes, klineRes] = await Promise.all([
-                this.fetchAIReport(tokenAddress),
-                this.fetchTokenMetrics(tokenAddress, chainLower),
-                this.fetchTokenKline(tokenAddress, chainLower)
-            ]);
-            aiReport = aiRes;
-            tokenMetrics = metricsRes;
-            tokenKline = klineRes;
-        }
+        // 获取所有额外数据（不过滤，获取原始数据）
+        const [aiReport, tokenMetrics, tokenKline] = await Promise.all([
+            this.fetchAIReport(tokenAddress),
+            this.fetchTokenMetrics(tokenAddress, chainLower),
+            this.fetchTokenKline(tokenAddress, chainLower)
+        ]);
         
         // 构建信号 - 使用 injectSignal 兼容的字段名
         const signal = {
