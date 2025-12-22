@@ -31,27 +31,60 @@ class GrokTwitterClient {
       throw new Error('XAI_API_KEY not configured');
     }
 
-    const query = `$${tokenSymbol}`;
+    // 取代币地址的前8位和后6位用于搜索
+    const caShort = tokenCA ? `${tokenCA.slice(0, 8)}...${tokenCA.slice(-6)}` : '';
+    const caPrefix = tokenCA ? tokenCA.slice(0, 10) : '';
 
     const prompt = `
-I need you to search Twitter/X for recent tweets about: ${query}
+Search Twitter/X for this SPECIFIC crypto token:
+- Symbol: $${tokenSymbol}
+- Contract Address: ${tokenCA || 'unknown'}
+- Chain: ${tokenCA?.startsWith('0x') ? 'BSC/ETH' : 'Solana'}
 
-Look for tweets from the last ${timeframeMinutes} minutes.
+IMPORTANT: There may be MULTIPLE tokens with the same symbol "$${tokenSymbol}". 
+You MUST verify the token by checking if tweets mention:
+- The contract address (full or partial): ${caPrefix}
+- Or the exact token on the correct chain
 
-Analyze what you find and provide this information in JSON format:
+Search for tweets from the LAST ${timeframeMinutes} minutes only.
+
+Look for tweets containing:
+1. "$${tokenSymbol}" + any part of the address "${caPrefix}"
+2. "$${tokenSymbol}" on Solana/BSC (depending on chain)
+3. Links to dexscreener/birdeye/gmgn with this token
+
+Analyze and return JSON:
 {
-  "mention_count": <number of tweets mentioning ${query}>,
-  "unique_authors": <number of different accounts posting>,
-  "engagement": <total likes + retweets across all tweets>,
-  "sentiment": "<positive/neutral/negative based on tweet content>",
-  "kol_count": <number of influencers with >10k followers>,
+  "mention_count": <number of tweets about THIS SPECIFIC token>,
+  "unique_authors": <number of different accounts>,
+  "engagement": <total likes + retweets>,
+  "sentiment": "positive/neutral/negative",
+  "kol_count": <influencers with >10k followers>,
+  "first_mention": {
+    "author": "@username of FIRST person to tweet about this token",
+    "time_ago": "X minutes ago",
+    "is_kol": true/false,
+    "followers": <follower count>
+  },
+  "origin_analysis": "<who started this hype? KOL/bot/organic community>",
+  "verified_token": true/false,
+  "confidence": "high/medium/low",
   "top_tweets": [
     {
       "text": "tweet content",
-      "author": "@username",
-      "engagement": <likes + retweets>
+      "author": "@username", 
+      "engagement": <likes + retweets>,
+      "is_kol": true/false
     }
   ]
+}
+
+If you cannot find tweets about THIS SPECIFIC token (with matching address), return:
+{
+  "mention_count": 0,
+  "verified_token": false,
+  "confidence": "low",
+  "reason": "No tweets found matching the contract address"
 }
 
 Return ONLY the JSON, no other text.
