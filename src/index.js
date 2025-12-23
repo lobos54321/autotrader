@@ -310,10 +310,19 @@ class SentimentArbitrageSystem {
       startDashboardServer();
       console.log('   ✅ Dashboard server active\n');
 
-      // 1. Start Telegram listener
-      console.log('📱 Starting Telegram signal listener...');
-      await this.telegramService.start();
-      console.log('   ✅ Telegram listener active\n');
+      // 1. Start Telegram listener (可选)
+      if (process.env.TELEGRAM_ENABLED !== 'false') {
+        console.log('📱 Starting Telegram signal listener...');
+        try {
+          await this.telegramService.start();
+          console.log('   ✅ Telegram listener active\n');
+        } catch (err) {
+          console.log(`   ⚠️ Telegram 启动失败: ${err.message}`);
+          console.log('   跳过 Telegram，继续运行其他模块...\n');
+        }
+      } else {
+        console.log('📱 Telegram listener: ❌ 已禁用\n');
+      }
 
       // 2. Start position monitor
       console.log('📊 Starting position monitor...');
@@ -357,43 +366,95 @@ class SentimentArbitrageSystem {
         }
       }
 
-      // 2.7 Start DeBot Playwright Scout (聪明钱追踪)
+      // 2.7 Start DeBot Playwright Scout (聪明钱追踪) + CrossValidator v2.0
       if (process.env.DEBOT_ENABLED === 'true') {
-        console.log('🕵️ Starting DeBot Playwright Scout...');
+        console.log('🕵️ Starting DeBot Playwright Scout + CrossValidator v2.0...');
         
         if (!this.debotScout.hasSession()) {
           console.log('   ⚠️ 未找到 DeBot Session!');
           console.log('   请先运行: node scripts/debot-login-setup.js');
           console.log('   跳过 DeBot Scout\n');
         } else {
+          // 启动 CrossValidator v2.0
+          this.crossValidator.start();
+          
           await this.debotScout.start();
-          this.debotScout.on('signal', (signal) => {
-            // 根据信号类型显示不同的动作
-            const typeLabel = signal.type === 'HOT_TOKEN' ? '热门代币' :
-                              signal.type === 'AI_SIGNAL' ? 'AI信号' :
-                              signal.action === 'buy' ? '聪明钱买入' : '聪明钱观察';
-            const emoji = signal.emoji || (signal.tokenTier === 'gold' ? '🥇' : 
-                          signal.tokenTier === 'silver' ? '🥈' : '🔥');
+          
+          // 将 Playwright Scout 的信号发送到 CrossValidator
+          this.debotScout.on('signal', async (signal) => {
+            // 转换为 CrossValidator 期望的 token 格式
+            const token = {
+              tokenAddress: signal.tokenAddress || signal.token_ca,
+              chain: signal.chain,
+              symbol: signal.symbol || signal.tokenName || signal.tokenAddress?.slice(0, 8),
+              smartWalletOnline: signal.smartMoneyCount || signal.smart_wallet_online || signal.smart_money_count || 0,
+              smartWalletTotal: signal.smart_wallet_total || 0,
+              liquidity: signal.liquidity || 0,
+              marketCap: signal.marketCap || 0,
+              price: signal.price || 0,
+              holders: signal.holders || 0,
+              volume: signal.volume || 0,
+              signalCount: signal.signalCount || signal.alertCount || 1,
+              maxPriceGain: signal.maxPriceGain || 0,
+              tokenLevel: signal.tokenLevel || signal.tokenTier || 'unknown',
+              isMintAbandoned: signal.isMintAbandoned !== false,
+              aiReport: signal.aiReport || null
+            };
             
-            // 详细日志
-            console.log(`\n${emoji} [DeBot] ${typeLabel}: ${signal.symbol || signal.tokenAddress?.slice(0,8)} (${signal.chain})`);
-            if (signal.smart_wallet_online !== undefined) {
-              console.log(`   🐋 聪明钱: ${signal.smart_wallet_online}/${signal.smart_wallet_total}`);
-            }
-            if (signal.marketCap) {
-              console.log(`   💰 市值: $${(signal.marketCap/1000).toFixed(1)}K | 流动性: $${((signal.liquidity || 0)/1000).toFixed(1)}K`);
-            }
-            if (signal.aiScore) {
-              console.log(`   🤖 AI评分: ${signal.aiScore}/10`);
-            }
+            // 简要日志
+            const emoji = signal.tokenLevel === 'gold' ? '🥇' : 
+                          signal.tokenLevel === 'silver' ? '🥈' : '🥉';
+            console.log(`\n${emoji} [DeBot → Validator] ${token.symbol} (${token.chain})`);
+            console.log(`   🐋 聪明钱: ${token.smartWalletOnline} | 📊 信号: ${token.signalCount}次 | 💰 流动性: $${(token.liquidity/1000).toFixed(1)}K`);
             
-            // 注入信号到处理流程
-            this.injectSignal(signal);
+            // 发送到 CrossValidator 进行评分
+            await this.crossValidator.onNewToken(token);
           });
-          console.log('   ✅ DeBot Scout active');
-          console.log('      - 🔥 Hot Tokens (热门代币)');
-          console.log('      - 🤖 AI Signals (AI信号)');
-          console.log('      - 🐋 Smart Money (聪明钱追踪)\n');
+          
+          // 监听 CrossValidator 验证通过的信号
+          this.crossValidator.on('validated-signal', async (result) => {
+            const { token, score, decision, llmResult } = result;
+            
+            console.log(`\n🎯 [CrossValidator] 验证完成: ${token.symbol}`);
+            console.log(`   📊 总分: ${score.total}/100`);
+            console.log(`   🎯 决策: ${decision.action} ${decision.tier ? `(${decision.tier})` : ''}`);
+            
+            // 如果决策是买入，注入到执行流程
+            if (decision.action === 'BUY') {
+              console.log(`   💰 仓位: ${decision.position} SOL`);
+              
+              this.injectValidatedSignal({
+                token: {
+                  address: token.tokenAddress,
+                  symbol: token.symbol,
+                  chain: token.chain
+                },
+                action: decision.tier === 'MAX' ? 'BUY_MAX' : 
+                        decision.tier === 'NORMAL' ? 'BUY_NORMAL' : 'BUY_SMALL',
+                rating: decision.tier,
+                positionSize: decision.position,
+                reasons: [decision.reason],
+                validation: {
+                  smartMoney: {
+                    online: token.smartWalletOnline || 0,
+                    total: token.smartWalletTotal || 0
+                  },
+                  aiScore: result.aiReport?.rating?.score || 0,
+                  llmScore: llmResult?.score || null,
+                  tgHeat: {
+                    count: result.tgHeat?.mentionCount || 0
+                  },
+                  score: score
+                }
+              });
+            }
+          });
+          
+          console.log('   ✅ DeBot Playwright Scout + CrossValidator v2.0 active');
+          console.log('      - 🔥 Hot Tokens → CrossValidator');
+          console.log('      - 🤖 AI Signals → CrossValidator');
+          console.log('      - 📊 评分: 聪明钱40% + AI叙事25% + TG共识15% + 动量10% + 安全10%');
+          console.log('      - 🧠 LLM分析: ' + (process.env.AI_ANALYSIS_ENABLED === 'true' ? '✅ 已启用' : '❌ 未启用') + '\n');
         }
       }
 
@@ -651,51 +712,64 @@ class SentimentArbitrageSystem {
       // ==========================================
       console.log('\n📈 [3/7] Computing soft alpha score...');
 
-      // Collect Twitter data using Grok API
+      // Collect Twitter data using Grok API (默认关闭)
       let twitterData = null;
       let grokNarrativeScore = null;
-      try {
-        console.log('   🐦 Searching Twitter via Grok API...');
-        twitterData = await this.grokClient.searchToken(
-          snapshot.symbol || token_ca.substring(0, 8),
-          token_ca,
-          15  // 15-minute window
-        );
-        
-        // 提取 Grok 叙事评分
-        if (twitterData.narrative_score) {
-          grokNarrativeScore = twitterData.narrative_score;
-          const ns = grokNarrativeScore;
-          console.log(`   ✅ Twitter: ${twitterData.mention_count} mentions`);
-          console.log(`   📊 Grok 叙事评分: ${ns.total}/100 (${ns.grade}) - ${ns.recommendation}`);
-          console.log(`      - 真实性: ${ns.breakdown?.authenticity || 0}/25`);
-          console.log(`      - KOL影响: ${ns.breakdown?.kol_power || 0}/25`);
-          console.log(`      - 传播潜力: ${ns.breakdown?.viral_potential || 0}/25`);
-          console.log(`      - 时机: ${ns.breakdown?.timing || 0}/25`);
-          if (ns.reasoning) {
-            console.log(`      💡 ${ns.reasoning}`);
+      const twitterEnabled = process.env.GROK_TWITTER_SEARCH_ENABLED === 'true';
+
+      if (twitterEnabled) {
+        try {
+          console.log('   🐦 Searching Twitter via Grok API...');
+          twitterData = await this.grokClient.searchToken(
+            snapshot.symbol || token_ca.substring(0, 8),
+            token_ca,
+            15  // 15-minute window
+          );
+
+          // 提取 Grok 叙事评分
+          if (twitterData.narrative_score) {
+            grokNarrativeScore = twitterData.narrative_score;
+            const ns = grokNarrativeScore;
+            console.log(`   ✅ Twitter: ${twitterData.mention_count} mentions`);
+            console.log(`   📊 Grok 叙事评分: ${ns.total}/100 (${ns.grade}) - ${ns.recommendation}`);
+            console.log(`      - 真实性: ${ns.breakdown?.authenticity || 0}/25`);
+            console.log(`      - KOL影响: ${ns.breakdown?.kol_power || 0}/25`);
+            console.log(`      - 传播潜力: ${ns.breakdown?.viral_potential || 0}/25`);
+            console.log(`      - 时机: ${ns.breakdown?.timing || 0}/25`);
+            if (ns.reasoning) {
+              console.log(`      💡 ${ns.reasoning}`);
+            }
+          } else {
+            console.log(`   ✅ Twitter: ${twitterData.mention_count || 0} mentions, ${twitterData.engagement?.total_likes || twitterData.engagement || 0} engagement`);
           }
-        } else {
-          console.log(`   ✅ Twitter: ${twitterData.mention_count || 0} mentions, ${twitterData.engagement?.total_likes || twitterData.engagement || 0} engagement`);
-        }
-        
-        // 显示源头分析
-        if (twitterData.origin_source) {
-          const origin = twitterData.origin_source;
-          console.log(`   🔍 信号源头: ${origin.type} (${origin.is_authentic ? '✅真实' : '⚠️可疑'})`);
-          if (origin.first_tweet?.author) {
-            console.log(`      首发: ${origin.first_tweet.author} (${origin.first_tweet.followers || '?'} 粉丝)`);
+
+          // 显示源头分析
+          if (twitterData.origin_source) {
+            const origin = twitterData.origin_source;
+            console.log(`   🔍 信号源头: ${origin.type} (${origin.is_authentic ? '✅真实' : '⚠️可疑'})`);
+            if (origin.first_tweet?.author) {
+              console.log(`      首发: ${origin.first_tweet.author} (${origin.first_tweet.followers || '?'} 粉丝)`);
+            }
           }
+
+          // 显示风险标记
+          if (twitterData.risk_flags && twitterData.risk_flags.length > 0) {
+            console.log(`   ⚠️ 风险: ${twitterData.risk_flags.join(', ')}`);
+          }
+
+        } catch (error) {
+          console.log(`   ⚠️  Twitter search failed: ${error.message}`);
+          // Continue without Twitter data
+          twitterData = {
+            mention_count: 0,
+            unique_authors: 0,
+            engagement: 0,
+            sentiment: 'neutral',
+            kol_count: 0
+          };
         }
-        
-        // 显示风险标记
-        if (twitterData.risk_flags && twitterData.risk_flags.length > 0) {
-          console.log(`   ⚠️ 风险: ${twitterData.risk_flags.join(', ')}`);
-        }
-        
-      } catch (error) {
-        console.log(`   ⚠️  Twitter search failed: ${error.message}`);
-        // Continue without Twitter data
+      } else {
+        console.log('   💤 Twitter search disabled (GROK_TWITTER_SEARCH_ENABLED!=true)');
         twitterData = {
           mention_count: 0,
           unique_authors: 0,

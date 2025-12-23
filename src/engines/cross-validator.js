@@ -23,6 +23,7 @@ import { EventEmitter } from 'events';
 import debotScout from '../inputs/debot-scout.js';
 import signalDatabase from '../database/signal-database.js';
 import aiAnalyst from '../utils/ai-analyst.js';
+import GrokTwitterClient from '../social/grok-twitter-client.js';
 
 class CrossValidator extends EventEmitter {
     constructor() {
@@ -73,6 +74,11 @@ class CrossValidator extends EventEmitter {
             bannedKeywords: ['scam', 'rug', 'honeypot', 'fake', '欺诈', '骗局']
         };
         
+        // 可选：X/Twitter 边界复核（默认关闭）
+        this.twitterEdgeEnabled = process.env.TWITTER_EDGE_CHECK_ENABLED === 'true';
+        this.twitterEdgeTimeoutMs = parseInt(process.env.TWITTER_EDGE_CHECK_TIMEOUT_MS || '2500', 10);
+        this.grokTwitterClient = null;
+
         // 状态
         this.isRunning = false;
         this.pendingValidation = new Map();
@@ -154,6 +160,19 @@ class CrossValidator extends EventEmitter {
             
             // === 综合评分 (传入 LLM 结果) ===
             const score = this.calculateScore(token, aiReport, tgHeat, llmResult);
+            
+            // === 可选：X/Twitter 边界复核（仅 55-70 分区间） ===
+            if (this.twitterEdgeEnabled && score.total >= this.scoringConfig.thresholds.buySmall && score.total < this.scoringConfig.thresholds.buyNormal) {
+                const xCheck = await this.runTwitterEdgeCheck(token);
+                score.xRisk = xCheck.risk;
+                score.xSummary = xCheck.summary;
+                score.xMentions = xCheck.mentions;
+                if (xCheck.risk === 'HIGH') {
+                    console.log(`⚠️ X边界复核: HIGH - ${xCheck.summary}`);
+                } else {
+                    console.log(`✅ X边界复核: OK - ${xCheck.summary}`);
+                }
+            }
             
             // === 做出决策 ===
             const decision = this.makeDecision(token, aiReport, tgHeat, score);
@@ -304,6 +323,49 @@ class CrossValidator extends EventEmitter {
             };
         }
     }
+
+    /**
+     * X/Twitter 边界复核：只在接近阈值时调用一次（省钱+提速）
+     */
+    async runTwitterEdgeCheck(token) {
+        try {
+            if (!process.env.XAI_API_KEY) {
+                return { risk: 'UNKNOWN', summary: 'XAI_API_KEY未配置', mentions: 0 };
+            }
+
+            if (!this.grokTwitterClient) {
+                this.grokTwitterClient = new GrokTwitterClient();
+            }
+
+            const symbol = token.symbol || token.tokenAddress.slice(0, 8);
+            const ca = token.tokenAddress;
+
+            const result = await Promise.race([
+                this.grokTwitterClient.searchToken(symbol, ca, 30),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('X edge check timeout')), this.twitterEdgeTimeoutMs))
+            ]);
+
+            const mentions = result?.mention_count || 0;
+            const origin = result?.origin_source;
+            const riskFlags = Array.isArray(result?.risk_flags) ? result.risk_flags : [];
+
+            // 简单规则：低提及 + 不真实/风险标记 → HIGH
+            if (mentions < 2) {
+                return { risk: 'HIGH', summary: `提及过少(${mentions})`, mentions };
+            }
+            if (origin && origin.is_authentic === false) {
+                return { risk: 'HIGH', summary: `源头可疑(${origin.type || 'unknown'})`, mentions };
+            }
+            if (riskFlags.length > 0) {
+                return { risk: 'HIGH', summary: `风险标记:${riskFlags.slice(0, 2).join(',')}`, mentions };
+            }
+
+            return { risk: 'LOW', summary: `提及${mentions}，未见明显风险`, mentions };
+
+        } catch (e) {
+            return { risk: 'UNKNOWN', summary: `X复核失败:${e.message}`, mentions: 0 };
+        }
+    }
     
     /**
      * 计算综合评分 v2.0
@@ -392,7 +454,10 @@ class CrossValidator extends EventEmitter {
                 safety: safetyScore
             },
             signalCount: signalCount,
-            llmRisk: llmResult?.risk_level || 'UNKNOWN'
+            llmRisk: llmResult?.risk_level || 'UNKNOWN',
+            xRisk: 'SKIPPED',
+            xSummary: null,
+            xMentions: null
         };
     }
     
@@ -433,6 +498,16 @@ class CrossValidator extends EventEmitter {
                 action: 'WATCH',
                 tier: null,
                 reason: `⚠️ AI识别高风险，强制观望`,
+                position: 0
+            };
+        }
+
+        // 规则3: X 边界复核高风险 → 强制 WATCH
+        if (score.xRisk === 'HIGH') {
+            return {
+                action: 'WATCH',
+                tier: null,
+                reason: `⚠️ X边界复核高风险: ${score.xSummary || 'unknown'}`,
                 position: 0
             };
         }
@@ -542,6 +617,14 @@ class CrossValidator extends EventEmitter {
             console.log(`   评分: ${llmResult.score}/100`);
             console.log(`   判断: ${llmResult.reason}`);
             console.log(`   风险: ${llmResult.risk_level}`);
+        }
+
+        // X 边界复核
+        if (score.xRisk && score.xRisk !== 'SKIPPED') {
+            console.log(`\n🐦 X边界复核:`);
+            console.log(`   风险: ${score.xRisk}`);
+            if (score.xMentions !== null) console.log(`   提及: ${score.xMentions}`);
+            if (score.xSummary) console.log(`   备注: ${score.xSummary}`);
         }
         
         // 决策
