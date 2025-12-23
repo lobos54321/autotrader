@@ -570,6 +570,10 @@ class SentimentArbitrageSystem {
   /**
    * Process individual signal through complete pipeline
    */
+  /**
+   * Process individual signal through simplified pipeline
+   * 旧 Telegram 流程简化版：Hard Gates → 转给 CrossValidator
+   */
   async processSignal(signal) {
     const { id, token_ca, chain, channel_name } = signal;
     const symbol = token_ca.substring(0, 8);
@@ -585,12 +589,9 @@ class SentimentArbitrageSystem {
         }
       }
 
-      // ==========================================
-      // STEP -1: CHECK SIGNAL SOURCE QUALITY
-      // ==========================================
+      // 检查信号源质量
       const shouldUse = this.sourceOptimizer.shouldUseSource('telegram', channel_name);
       if (!shouldUse) {
-        // Source is blacklisted or inactive - skip silently
         this.markSignalProcessed(id);
         return;
       }
@@ -601,9 +602,7 @@ class SentimentArbitrageSystem {
 
       this.stats.signals_received++;
       
-      // ==========================================
-      // STEP 0.5: RISK MANAGER - CAN WE TRADE?
-      // ==========================================
+      // 风险管理检查
       const canTradeCheck = this.riskManager.canTrade();
       if (!canTradeCheck.allowed) {
         console.log(`\n🛡️ [Risk] 无法交易: ${canTradeCheck.reason}`);
@@ -611,37 +610,17 @@ class SentimentArbitrageSystem {
         return;
       }
 
-      // Record signal for source tracking
-      const signalOutcomeId = this.sourceOptimizer.recordSignal(
-        'telegram', 
-        channel_name, 
-        channel_name, 
-        token_ca, 
-        chain
-      );
-      
-      // Store for shadow tracking later
-      this.lastSignalOutcomeId = signalOutcomeId;
-
-      // ==========================================
-      // STEP 0: PERMANENT BLACKLIST CHECK
-      // ==========================================
+      // 永久黑名单检查
       const blacklistRecord = this.blacklistService.isBlacklisted(token_ca, chain);
       if (blacklistRecord) {
-        console.log(`\n🚫 [0/7] PERMANENT BLACKLIST HIT`);
-        console.log(`   Token: ${chain}/${token_ca}`);
-        console.log(`   Reason: ${blacklistRecord.blacklist_reason}`);
-        console.log(`   Blacklisted: ${new Date(blacklistRecord.blacklist_timestamp).toISOString()}`);
-        console.log(`   ❌ REJECTED - Permanent blacklist (不再处理)`);
+        console.log(`\n🚫 BLACKLIST: ${blacklistRecord.blacklist_reason}`);
         this.markSignalProcessed(id);
         this.stats.reject_decisions++;
         return;
       }
 
-      // ==========================================
-      // STEP 1: CHAIN SNAPSHOT + TOKEN METADATA
-      // ==========================================
-      console.log('\n📊 [1/7] Fetching chain snapshot...');
+      // 获取链上快照
+      console.log('\n📊 [1/2] Fetching chain snapshot...');
       const snapshot = await this.getChainSnapshot(chain, token_ca);
 
       if (!snapshot) {
@@ -653,41 +632,10 @@ class SentimentArbitrageSystem {
 
       console.log(`   ✅ Snapshot: Price=$${snapshot.current_price?.toFixed(10)}, Liquidity=$${(snapshot.liquidity_usd || 0).toFixed(0)}`);
 
-      // Get Token Metadata (name, symbol, description) for Narrative detection
-      let tokenMetadata = {
-        token_ca,
-        chain,
-        name: null,
-        symbol: symbol || null,  // Use signal symbol as fallback
-        description: null
-      };
-
-      try {
-        const service = chain === 'SOL' ? this.solService : this.bscService;
-
-        // Only fetch metadata if service has getTokenMetadata method
-        if (typeof service.getTokenMetadata === 'function') {
-          const metadata = await service.getTokenMetadata(token_ca);
-          tokenMetadata = {
-            token_ca,
-            chain,
-            name: metadata.name || null,
-            symbol: metadata.symbol || symbol || null,  // Fallback to signal symbol
-            description: metadata.description || null
-          };
-        }
-      } catch (error) {
-        console.log(`   ⚠️  Token metadata fetch failed: ${error.message}`);
-        // Continue with null metadata - Narrative score will be 0
-      }
-
-      // ==========================================
-      // STEP 2: HARD GATES
-      // ==========================================
-      console.log('\n🚧 [2/7] Running hard gates...');
+      // Hard Gates 检查
+      console.log('\n🚧 [2/2] Running hard gates...');
       const gateResult = await this.hardGateService.evaluate(snapshot, chain);
 
-      // Handle REJECT status
       if (gateResult.status === 'REJECT') {
         const reasonText = (gateResult.reasons || []).join(', ') || 'Unknown reason';
         console.log(`   ❌ Hard gate REJECT: ${reasonText}`);
@@ -696,479 +644,57 @@ class SentimentArbitrageSystem {
         return;
       }
 
-      // Handle GREYLIST status
       if (gateResult.status === 'GREYLIST') {
-        const reasonText = (gateResult.reasons || []).join(', ') || 'Unknown data';
-        console.log(`   ⚠️  Hard gate GREYLIST: ${reasonText}`);
-        // Continue processing but log as greylist
+        console.log(`   ⚠️  Hard gate GREYLIST: ${(gateResult.reasons || []).join(', ')}`);
         this.stats.greylist_decisions++;
       } else {
-        console.log(`   ✅ All hard gates passed (PASS)`);
+        console.log(`   ✅ Hard gates passed`);
         this.stats.hard_gate_passed++;
       }
 
-      // ==========================================
-      // STEP 3: SOFT ALPHA SCORE
-      // ==========================================
-      console.log('\n📈 [3/7] Computing soft alpha score...');
-
-      // Collect Twitter data using Grok API (默认关闭)
-      let twitterData = null;
-      let grokNarrativeScore = null;
-      const twitterEnabled = process.env.GROK_TWITTER_SEARCH_ENABLED === 'true';
-
-      if (twitterEnabled) {
-        try {
-          console.log('   🐦 Searching Twitter via Grok API...');
-          twitterData = await this.grokClient.searchToken(
-            snapshot.symbol || token_ca.substring(0, 8),
-            token_ca,
-            15  // 15-minute window
-          );
-
-          // 提取 Grok 叙事评分
-          if (twitterData.narrative_score) {
-            grokNarrativeScore = twitterData.narrative_score;
-            const ns = grokNarrativeScore;
-            console.log(`   ✅ Twitter: ${twitterData.mention_count} mentions`);
-            console.log(`   📊 Grok 叙事评分: ${ns.total}/100 (${ns.grade}) - ${ns.recommendation}`);
-            console.log(`      - 真实性: ${ns.breakdown?.authenticity || 0}/25`);
-            console.log(`      - KOL影响: ${ns.breakdown?.kol_power || 0}/25`);
-            console.log(`      - 传播潜力: ${ns.breakdown?.viral_potential || 0}/25`);
-            console.log(`      - 时机: ${ns.breakdown?.timing || 0}/25`);
-            if (ns.reasoning) {
-              console.log(`      💡 ${ns.reasoning}`);
-            }
-          } else {
-            console.log(`   ✅ Twitter: ${twitterData.mention_count || 0} mentions, ${twitterData.engagement?.total_likes || twitterData.engagement || 0} engagement`);
-          }
-
-          // 显示源头分析
-          if (twitterData.origin_source) {
-            const origin = twitterData.origin_source;
-            console.log(`   🔍 信号源头: ${origin.type} (${origin.is_authentic ? '✅真实' : '⚠️可疑'})`);
-            if (origin.first_tweet?.author) {
-              console.log(`      首发: ${origin.first_tweet.author} (${origin.first_tweet.followers || '?'} 粉丝)`);
-            }
-          }
-
-          // 显示风险标记
-          if (twitterData.risk_flags && twitterData.risk_flags.length > 0) {
-            console.log(`   ⚠️ 风险: ${twitterData.risk_flags.join(', ')}`);
-          }
-
-        } catch (error) {
-          console.log(`   ⚠️  Twitter search failed: ${error.message}`);
-          // Continue without Twitter data
-          twitterData = {
-            mention_count: 0,
-            unique_authors: 0,
-            engagement: 0,
-            sentiment: 'neutral',
-            kol_count: 0
-          };
-        }
-      } else {
-        console.log('   💤 Twitter search disabled (GROK_TWITTER_SEARCH_ENABLED!=true)');
-        twitterData = {
-          mention_count: 0,
-          unique_authors: 0,
-          engagement: 0,
-          sentiment: 'neutral',
-          kol_count: 0
-        };
-      }
-
-      // Collect Smart Money data
-      let smartMoneyData = null;
-      try {
-        smartMoneyData = await this.smartMoneyTracker.getSmartMoneyScore(token_ca, chain);
-        if (smartMoneyData.score !== 0) {
-          console.log(`   🐋 Smart Money: ${smartMoneyData.reasons.join(', ')}`);
-        }
-      } catch (error) {
-        console.log(`   ⚠️  Smart money check failed: ${error.message}`);
-        smartMoneyData = { score: 0, reasons: ['数据获取失败'] };
-      }
-
-      // Prepare data structures for soft scorer
-      // Get channel tier from database
-      let channelTier = 'C'; // Default
-      try {
-        const channelInfo = this.db.prepare(`
-          SELECT tier FROM telegram_channels 
-          WHERE channel_name = ? OR channel_username LIKE ?
-        `).get(signal.channel_name, `%${signal.channel_name}%`);
-        if (channelInfo) {
-          channelTier = channelInfo.tier;
-        }
-      } catch (e) {
-        // Ignore, use default tier
-      }
-
-      // Calculate time lag (minutes since first mention)
-      const signalTime = new Date(signal.timestamp).getTime();
-      const timeLagMinutes = Math.floor((Date.now() - signalTime) / 60000);
-
-      // ==========================================
-      // 查询 15 分钟内有多少频道提到同一个 token（信号聚合）
-      // ==========================================
-      let tg_ch_15m = 1;
-      let tg_clusters_15m = 1;
-      let promotedChannels = [];
-      
+      // 查询 15 分钟内同 token 的 TG 提及数
+      let tgMentions = 1;
       try {
         const fifteenMinutesAgo = Math.floor(Date.now() / 1000) - (15 * 60);
-        
-        // 查询 15 分钟内提到同一个 token 的所有信号
         const recentSignals = this.db.prepare(`
-          SELECT DISTINCT channel_name, created_at
+          SELECT COUNT(DISTINCT channel_name) as cnt
           FROM telegram_signals
           WHERE token_ca = ? AND created_at >= ?
-          ORDER BY created_at ASC
-        `).all(token_ca, fifteenMinutesAgo);
-        
-        if (recentSignals.length > 0) {
-          tg_ch_15m = recentSignals.length;
-          
-          // 获取每个频道的 tier
-          const uniqueChannels = [...new Set(recentSignals.map(s => s.channel_name))];
-          tg_clusters_15m = uniqueChannels.length;
-          
-          promotedChannels = uniqueChannels.map(ch => {
-            const chInfo = this.db.prepare(`
-              SELECT tier FROM telegram_channels 
-              WHERE channel_name = ? OR channel_username LIKE ?
-            `).get(ch, `%${ch}%`);
-            return {
-              name: ch,
-              tier: chInfo?.tier || 'C',
-              timestamp: signalTime
-            };
-          });
-          
-          if (tg_ch_15m > 1) {
-            console.log(`   📢 信号聚合: ${tg_ch_15m} 条信号来自 ${tg_clusters_15m} 个频道`);
-          }
-        }
+        `).get(token_ca, fifteenMinutesAgo);
+        tgMentions = recentSignals?.cnt || 1;
       } catch (e) {
-        console.log(`   ⚠️ 信号聚合查询失败: ${e.message}`);
+        // 忽略
       }
 
-      const socialData = {
-        // Telegram data - structured for scoring
-        total_mentions: tg_ch_15m,
-        unique_channels: tg_clusters_15m,
-        tg_ch_15m: tg_ch_15m,  // 实际的频道数量（从数据库查询）
-        tg_clusters_15m: tg_clusters_15m,  // 实际的独立频道数
-        tg_velocity: tg_ch_15m > 1 ? tg_ch_15m / 15 : 0.5,  // 实际速度
-        tg_accel: 0,
-        tg_time_lag: timeLagMinutes,  // Minutes since first mention
-        N_total: tg_ch_15m,
-        
-        // Channel info for AI Influencer System
-        channel_name: signal.channel_name,
-        
-        // Promoted channels with tier info (required for Influence scoring)
-        // 使用聚合后的所有频道
-        promoted_channels: promotedChannels.length > 0 ? promotedChannels : [{
-          name: signal.channel_name,
-          tier: channelTier,
-          timestamp: signalTime
-        }],
-        
-        // Legacy field - 所有提到这个 token 的频道
-        channels: promotedChannels.length > 0 
-          ? promotedChannels.map(c => c.name) 
-          : [signal.channel_name],
-        message_timestamp: signal.timestamp,
-
-        // Twitter data (from Grok API)
-        twitter_mentions: twitterData.mention_count,
-        twitter_unique_authors: twitterData.unique_authors,
-        twitter_kol_count: twitterData.kol_involvement?.real_kol_count || twitterData.kol_count || 0,
-        twitter_engagement: twitterData.engagement?.total_likes || twitterData.engagement || 0,
-        twitter_sentiment: twitterData.sentiment,
-        top_tweets: twitterData.top_tweets || [],
-        
-        // Grok 叙事评分（新增）
-        grok_narrative_score: grokNarrativeScore,
-        grok_origin_source: twitterData.origin_source || null,
-        grok_kol_involvement: twitterData.kol_involvement || null,
-        grok_bot_detection: twitterData.bot_detection || null,
-        grok_risk_flags: twitterData.risk_flags || [],
-        grok_confidence: twitterData.confidence || 'low',
-        grok_verified_token: twitterData.verified_token || false,
-        
-        // X validation fields
-        x_unique_authors_15m: twitterData.unique_authors,
-        x_tier1_hit: (twitterData.kol_involvement?.real_kol_count || twitterData.kol_count || 0) >= 1 ? 1 : 0,
-        
-        // ==========================================
-        // 链上数据（从 snapshot 传入，用于 Graph 评分）
-        // ==========================================
-        chain_data: {
-          liquidity_usd: snapshot.liquidity_usd || 0,
-          top10_percent: snapshot.top10_percent || null,
-          holder_count: snapshot.holder_count || null,
-          current_price: snapshot.current_price || 0,
-          // Pump.fun 特有数据
-          is_pumpfun: snapshot.is_pumpfun || false,
-          market_cap: snapshot.market_cap || 0,
-          volume_24h: snapshot.volume_24h || 0,
-          txns_24h: snapshot.txns_24h || 0,
-          bonding_progress: snapshot.bonding_progress || 0
-        }
-      };
-
-      // Use tokenMetadata (from Step 1) for Narrative detection
-      // If metadata fetch failed, tokenMetadata will have null values
-      const scoreResult = await this.softScorer.calculate(socialData, tokenMetadata);
+      // 转给 CrossValidator 处理
+      console.log(`\n➡️ 转交 CrossValidator 评分...`);
       
-      // 如果有 Grok 叙事评分，用它来调整最终分数
-      let finalScore = scoreResult.score;
-      let grokAdjustment = 0;
-      
-      if (grokNarrativeScore && grokNarrativeScore.total) {
-        // Grok 评分权重：占最终分数的 30%
-        const grokWeight = 0.3;
-        const originalWeight = 0.7;
-        
-        // 混合计算
-        finalScore = Math.round(
-          (scoreResult.score * originalWeight) + 
-          (grokNarrativeScore.total * grokWeight)
-        );
-        grokAdjustment = finalScore - scoreResult.score;
-        
-        // 风险标记扣分
-        if (twitterData.risk_flags && twitterData.risk_flags.length > 0) {
-          const riskPenalty = Math.min(twitterData.risk_flags.length * 5, 20);
-          finalScore = Math.max(0, finalScore - riskPenalty);
-          grokAdjustment -= riskPenalty;
-        }
-        
-        // 如果 Grok 说 "run"，直接大幅扣分
-        if (grokNarrativeScore.recommendation === 'run') {
-          finalScore = Math.min(finalScore, 30);
-        } else if (grokNarrativeScore.recommendation === 'avoid') {
-          finalScore = Math.min(finalScore, 45);
-        }
-      }
-
-      console.log(`   📊 Score: ${finalScore}/100${grokAdjustment !== 0 ? ` (Grok调整: ${grokAdjustment > 0 ? '+' : ''}${grokAdjustment})` : ''}`);
-      console.log(`   Components:`);
-      console.log(`      - Narrative: ${scoreResult.breakdown.narrative.score.toFixed(1)}`);
-      console.log(`      - Influence: ${scoreResult.breakdown.influence.score.toFixed(1)}`);
-      console.log(`      - TG Spread: ${scoreResult.breakdown.tg_spread.score.toFixed(1)}`);
-      console.log(`      - Graph: ${scoreResult.breakdown.graph.score.toFixed(1)}`);
-      console.log(`      - Source: ${scoreResult.breakdown.source.score.toFixed(1)}`);
-      if (grokNarrativeScore) {
-        console.log(`      - Grok叙事: ${grokNarrativeScore.total}/100 (${grokNarrativeScore.grade})`);
-      }
-
-      this.stats.soft_score_computed++;
-      
-      // 更新 scoreResult 的分数为调整后的分数
-      scoreResult.score = finalScore;
-      scoreResult.grok_narrative = grokNarrativeScore;
-
-      // ==========================================
-      // STEP 3.1: RISK MANAGER - SIGNAL EVALUATION
-      // ==========================================
-      console.log('\n🛡️ [3.1/7] Risk evaluation...');
-      const riskEval = this.riskManager.evaluateSignal(signal, finalScore, snapshot);
-      
-      if (!riskEval.allowed) {
-        console.log(`   ❌ Risk rejected: ${riskEval.reason}`);
-        this.markSignalProcessed(id);
-        this.stats.reject_decisions++;
-        return;
-      }
-      
-      // Update score with time decay if applied
-      if (riskEval.adjustedScore !== scoreResult.score) {
-        console.log(`   ⚠️ 分数调整: ${scoreResult.score} → ${riskEval.adjustedScore.toFixed(0)} (${riskEval.reason})`);
-        scoreResult.score = riskEval.adjustedScore;
-      } else {
-        console.log(`   ✅ Risk check passed: ${riskEval.reason}`);
-      }
-      
-      // ==========================================
-      // SHADOW MODE: Track price for source evaluation
-      // ==========================================
-      if (this.config.SHADOW_MODE && snapshot.current_price > 0) {
-        // Get the signal outcome ID we recorded earlier
-        const signalOutcomeId = this.lastSignalOutcomeId || null;
-        
-        this.shadowTracker.trackSignal(
-          token_ca,
-          chain,
-          snapshot.current_price,
-          snapshot.liquidity_usd || 0,
-          'telegram',
-          channel_name,
-          signalOutcomeId
-        );
-      }
-
-      // ==========================================
-      // STEP 3.5: EXIT GATE (can we exit if we enter?)
-      // ==========================================
-      console.log('\n🚪 [3.5/7] Running exit gate...');
-      
-      // Get preliminary position size for slippage testing
-      const preliminaryPositionSize = this.config.position_templates[chain]?.small?.sol || 
-                                       this.config.position_templates[chain]?.small?.bnb || 0.5;
-      
-      const exitGateResult = this.exitGateService.evaluate(snapshot, preliminaryPositionSize);
-      
-      if (exitGateResult.status === 'REJECT') {
-        const reasonText = (exitGateResult.reasons || []).join(', ') || 'Exit not feasible';
-        console.log(`   ❌ Exit gate REJECT: ${reasonText}`);
-        this.markSignalProcessed(id);
-        this.stats.reject_decisions++;
-        return;
-      }
-      
-      if (exitGateResult.status === 'GREYLIST') {
-        const reasonText = (exitGateResult.reasons || []).join(', ') || 'Exit uncertain';
-        console.log(`   ⚠️  Exit gate GREYLIST: ${reasonText}`);
-      } else {
-        console.log(`   ✅ Exit gate passed (PASS)`);
-      }
-
-      // ==========================================
-      // STEP 4: DECISION MATRIX
-      // ==========================================
-      console.log('\n🎯 [4/7] Making decision...');
-
-      // Build evaluation object for decision engine
-      const evaluation = {
-        token_ca: token_ca,
+      const tokenForValidator = {
+        tokenAddress: token_ca,
         chain: chain,
-        hard_gate: gateResult,
-        exit_gate: exitGateResult,
-        soft_score: scoreResult
+        symbol: snapshot.symbol || symbol,
+        smartWalletOnline: snapshot.smart_money_count || 0,
+        smartWalletTotal: snapshot.smart_money_total || 0,
+        liquidity: snapshot.liquidity_usd || 0,
+        isMintAbandoned: snapshot.mint_abandoned !== false,
+        signalCount: tgMentions,
+        price: snapshot.current_price || 0,
+        marketCap: snapshot.market_cap || 0,
+        source: `TG:${channel_name}`
       };
 
-      const decision = this.decisionEngine.decide(evaluation);
+      // 调用 CrossValidator
+      await this.crossValidator.onNewToken(tokenForValidator);
 
-      console.log(`   Decision: ${decision.action} (Rating: ${decision.rating})`);
-      const reasonText = Array.isArray(decision.reasons) ? decision.reasons[0] : 'Unknown';
-      console.log(`   Reason: ${reasonText}`);
-
-      if (decision.action === 'REJECT') {
-        console.log(`   ❌ Rejected`);
-        this.markSignalProcessed(id);
-        this.stats.reject_decisions++;
-        return;
-      }
-
-      if (decision.action === 'WATCH_ONLY' || decision.action === 'WATCH') {
-        console.log(`   ⚠️  Watch only - manual verification required`);
-        this.markSignalProcessed(id);
-        this.stats.greylist_decisions++;
-        return;
-      }
-
-      // AUTO_BUY or BUY_WITH_CONFIRM
-      if (decision.action === 'AUTO_BUY' || decision.action === 'BUY_WITH_CONFIRM') {
-        console.log(`   ✅ BUY signal - proceeding to position sizing`);
-        this.stats.buy_decisions++;
-      } else {
-        // Unexpected action - log warning
-        console.log(`   ⚠️  Unexpected action: ${decision.action}`);
-        this.markSignalProcessed(id);
-        return;
-      }
-
-      // ==========================================
-      // STEP 5: POSITION SIZING
-      // ==========================================
-      console.log('\n💰 [5/7] Calculating position size...');
-
-      // Use tokenMetadata from Step 1
-      const positionCheck = await this.positionSizer.canOpenPosition(decision, tokenMetadata);
-
-      if (!positionCheck.allowed) {
-        console.log(`   ❌ Cannot trade: ${positionCheck.reason}`);
-        this.markSignalProcessed(id);
-        return;
-      }
-
-      console.log(`   ✅ Position approved`);
-      if (positionCheck.adjusted_size) {
-        console.log(`      Size: ${positionCheck.adjusted_size.amount} ${chain}`);
-        console.log(`      (~$${positionCheck.adjusted_size.usd_value} USD)`);
-      }
-
-      // ==========================================
-      // STEP 6: EXECUTION
-      // ==========================================
-      console.log('\n⚡ [6/7] Executing trade...');
-
-      const tradeParams = {
-        chain,
-        token_ca,
-        position_size: positionCheck.adjusted_size || decision.position_size,
-        max_slippage_bps: 500, // 5%
-        symbol: snapshot.symbol || 'Unknown'
-      };
-
-      // Shadow mode or auto-buy disabled: record virtual position without execution
-      if (this.config.SHADOW_MODE || !this.config.AUTO_BUY_ENABLED) {
-        console.log(`   🎭 Shadow mode - Recording virtual position (no execution)`);
-        
-        const virtualExecutionResult = {
-          success: true,
-          trade_id: `shadow_${Date.now()}_${Math.random().toString(36).substring(7)}`,
-          method: 'shadow',
-          tx_hash: null
-        };
-        
-        const finalPositionSize = positionCheck.adjusted_size || tradeParams.position_size;
-        this.recordPosition(signal, snapshot, scoreResult, finalPositionSize, virtualExecutionResult, true);
-        this.stats.executions_success++;
-        
-      } else {
-        // Live mode: execute real trade
-        const executionResult = await this.executor.executeBuy(tradeParams);
-
-        if (executionResult.success) {
-          console.log(`   ✅ Execution successful!`);
-          console.log(`      Trade ID: ${executionResult.trade_id}`);
-          console.log(`      Method: ${executionResult.method}`);
-          if (executionResult.tx_hash) {
-            console.log(`      TX: ${executionResult.tx_hash}`);
-          }
-          this.stats.executions_success++;
-
-          // Record position - use positionCheck.adjusted_size
-          const finalPositionSize = positionCheck.adjusted_size || tradeParams.position_size;
-          this.recordPosition(signal, snapshot, scoreResult, finalPositionSize, executionResult, false);
-
-        } else {
-          console.log(`   ❌ Execution failed: ${executionResult.error}`);
-          this.stats.executions_failed++;
-        }
-      }
-
-      // ==========================================
-      // STEP 7: MARK PROCESSED
-      // ==========================================
-      this.markSignalProcessed(id);
+      // 标记已处理
       this.processedSignals.set(cacheKey, Date.now());
-
-      console.log('\n✅ Signal processing complete');
-      console.log('─'.repeat(80) + '\n');
+      this.markSignalProcessed(id);
 
     } catch (error) {
-      console.error(`❌ Process signal error [${symbol}]:`, error.message);
+      console.error(`❌ Process signal error: ${error.message}`);
       this.markSignalProcessed(id);
     }
   }
-
   /**
    * Get chain snapshot
    */
