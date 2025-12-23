@@ -44,16 +44,23 @@ class CrossValidator extends EventEmitter {
             thresholds: {
                 ignore: 50,          // 忽略线
                 watch: 55,           // 观察线
-                buySmall: 55,        // 小仓买入线
-                buyNormal: 70,       // 标准买入线
-                buyMax: 80           // 重仓线
+                buyScout: 55,        // Scout买入线 (55-69分)
+                buyNormal: 70,       // 普通买入线 (70-79分)
+                buyPremium: 80       // 精选买入线 (80+分)
             },
             
-            // 仓位配置 (SOL)
+            // 仓位配置 (SOL) - 分级仓位管理
             positions: {
-                small: 0.05,         // 小仓
-                normal: 0.15,        // 中仓
-                max: 0.20            // 大仓
+                scout: 0.10,         // Scout级: 0.10 SOL
+                normal: 0.15,        // 普通级: 0.15 SOL
+                premium: 0.25        // 精选级: 0.25 SOL
+            },
+            
+            // 各级别最大仓位数
+            maxPositions: {
+                scout: 2,            // Scout级最多 2 个
+                normal: 3,           // 普通级最多 3 个
+                premium: 3           // 精选级最多 3 个
             },
             
             // 报警动量"黄金区间"配置
@@ -84,10 +91,55 @@ class CrossValidator extends EventEmitter {
         this.pendingValidation = new Map();
         this.validatedTokens = new Map();
         
+        // 当前持仓计数（按级别）
+        this.currentPositions = {
+            scout: 0,    // 当前 Scout 级持仓数
+            normal: 0,   // 当前普通级持仓数
+            premium: 0   // 当前精选级持仓数
+        };
+        
         // Tier 1 频道列表（需要配置）
         this.tier1Channels = new Set([
             // 添加 Tier 1 频道ID
         ]);
+    }
+    
+    /**
+     * 获取信号级别
+     */
+    getSignalTier(score) {
+        const t = this.scoringConfig.thresholds;
+        if (score >= t.buyPremium) return 'premium';
+        if (score >= t.buyNormal) return 'normal';
+        if (score >= t.buyScout) return 'scout';
+        return null; // 不够买入
+    }
+    
+    /**
+     * 检查该级别是否还有仓位
+     */
+    hasAvailableSlot(tier) {
+        const max = this.scoringConfig.maxPositions[tier];
+        const current = this.currentPositions[tier];
+        return current < max;
+    }
+    
+    /**
+     * 占用仓位
+     */
+    occupySlot(tier) {
+        this.currentPositions[tier]++;
+        console.log(`[Position] ${tier} 级仓位: ${this.currentPositions[tier]}/${this.scoringConfig.maxPositions[tier]}`);
+    }
+    
+    /**
+     * 释放仓位（卖出时调用）
+     */
+    releaseSlot(tier) {
+        if (this.currentPositions[tier] > 0) {
+            this.currentPositions[tier]--;
+        }
+        console.log(`[Position] ${tier} 级仓位释放: ${this.currentPositions[tier]}/${this.scoringConfig.maxPositions[tier]}`);
     }
     
     /**
@@ -525,7 +577,7 @@ class CrossValidator extends EventEmitter {
         }
         
         // 观察区间 [50, 55)
-        if (score.total < thresholds.buySmall) {
+        if (score.total < thresholds.buyScout) {
             return {
                 action: 'WATCH',
                 tier: null,
@@ -534,30 +586,53 @@ class CrossValidator extends EventEmitter {
             };
         }
         
-        // 买入区间
-        let position, tier, emoji;
+        // === 分级仓位管理 ===
+        // 确定信号级别
+        const signalTier = this.getSignalTier(score.total);
         
-        if (score.total >= thresholds.buyMax) {
-            // S级: 80+ 分
-            position = positions.max;
-            tier = 'MAX';
+        if (!signalTier) {
+            return {
+                action: 'WATCH',
+                tier: null,
+                reason: `👀 评分不足买入线 (${score.total}分)`,
+                position: 0
+            };
+        }
+        
+        // 检查该级别是否有空仓位
+        if (!this.hasAvailableSlot(signalTier)) {
+            return {
+                action: 'WATCH',
+                tier: signalTier,
+                reason: `⏸️ ${signalTier}级仓位已满 (${this.currentPositions[signalTier]}/${this.scoringConfig.maxPositions[signalTier]})，等待空位`,
+                position: 0
+            };
+        }
+        
+        // 确定仓位大小和标签
+        let position, emoji;
+        
+        if (signalTier === 'premium') {
+            // 精选级: 80+ 分
+            position = positions.premium;
             emoji = '🚀';
-        } else if (score.total >= thresholds.buyNormal) {
-            // A级: 70-79 分
+        } else if (signalTier === 'normal') {
+            // 普通级: 70-79 分
             position = positions.normal;
-            tier = 'NORMAL';
             emoji = '✅';
         } else {
-            // B级: 55-69 分 (潜伏局)
-            position = positions.small;
-            tier = 'SCOUT';
+            // Scout级: 55-69 分
+            position = positions.scout;
             emoji = '🐦';
         }
         
+        // 占用仓位
+        this.occupySlot(signalTier);
+        
         return {
             action: 'BUY',
-            tier,
-            reason: `${emoji} ${tier}级 (${score.total}分) - ${this.getDecisionReason(token, aiReport, tgHeat, score)}`,
+            tier: signalTier.toUpperCase(),
+            reason: `${emoji} ${signalTier.toUpperCase()}级 (${score.total}分) - ${this.getDecisionReason(token, aiReport, tgHeat, score)}`,
             position
         };
     }
@@ -660,6 +735,8 @@ class CrossValidator extends EventEmitter {
         
         const t = this.scoringConfig.thresholds;
         const m = this.scoringConfig.signalMomentum;
+        const p = this.scoringConfig.positions;
+        const mp = this.scoringConfig.maxPositions;
         
         console.log('\n🔄 [CrossValidator v2.0] 交叉验证引擎启动');
         console.log(`   Hard Gates:`);
@@ -668,9 +745,11 @@ class CrossValidator extends EventEmitter {
         console.log(`     - 最低DeBot评分: ${this.hardGates.minAIScore}`);
         console.log(`   评分权重:`);
         console.log(`     - 聪明钱: 40% | AI叙事: 25% | TG共识: 15% | 动量: 10% | 安全: 10%`);
-        console.log(`   决策阈值:`);
-        console.log(`     - IGNORE: <${t.ignore}分 | WATCH: ${t.ignore}-${t.buySmall-1}分`);
-        console.log(`     - BUY_SMALL: ${t.buySmall}-${t.buyNormal-1}分 | BUY_NORMAL: ${t.buyNormal}-${t.buyMax-1}分 | BUY_MAX: ${t.buyMax}+分`);
+        console.log(`   分级仓位管理:`);
+        console.log(`     - Scout级 (55-69分): ${p.scout} SOL × ${mp.scout} 仓位`);
+        console.log(`     - 普通级 (70-79分): ${p.normal} SOL × ${mp.normal} 仓位`);
+        console.log(`     - 精选级 (80+分): ${p.premium} SOL × ${mp.premium} 仓位`);
+        console.log(`     - 总仓位: ${mp.scout + mp.normal + mp.premium} 个 | 最大敞口: ${(p.scout * mp.scout + p.normal * mp.normal + p.premium * mp.premium).toFixed(2)} SOL`);
         console.log(`   报警动量黄金区间:`);
         console.log(`     - 黄金区: ${m.goldenMin}-${m.goldenMax}次 (+10分)`);
         console.log(`     - 过热强制WATCH: >${m.overheat}次`);

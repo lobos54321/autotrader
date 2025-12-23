@@ -327,10 +327,165 @@ if (command === 'all') {
 }
 
 // ========================================
+// 7. CrossValidator 验证信号
+// ========================================
+if (command === 'all' || command === 'validated') {
+  console.log('┌─────────────────────────────────────────────────────────────────────┐');
+  console.log('│ 🎯 CROSSVALIDATOR SIGNALS (DeBot验证通过)                           │');
+  console.log('└─────────────────────────────────────────────────────────────────────┘\n');
+  
+  try {
+    const validatedSignals = db.prepare(`
+      SELECT 
+        token_ca,
+        chain,
+        channel_name,
+        message_text,
+        datetime(created_at, 'unixepoch') as signal_time
+      FROM telegram_signals
+      WHERE channel_name LIKE 'DeBot%'
+      ORDER BY created_at DESC
+      LIMIT 15
+    `).all();
+    
+    if (validatedSignals.length === 0) {
+      console.log('   ⏳ No CrossValidator signals yet.\n');
+    } else {
+      console.log('   Token    │ Rating │ Position │ Smart$ │ AI │ TG │ Score │ Time');
+      console.log('   ─────────┼────────┼──────────┼────────┼────┼────┼───────┼─────────────');
+      
+      validatedSignals.forEach(s => {
+        const token = (s.token_ca || '').substring(0, 8);
+        const msg = s.message_text || '';
+        
+        // 解析消息
+        const ratingMatch = msg.match(/评级:\s*(\w+)/);
+        const posMatch = msg.match(/仓位:\s*([\d.]+)\s*SOL/);
+        const smartMatch = msg.match(/聪明钱:\s*(\d+)\/(\d+)/);
+        const aiMatch = msg.match(/AI评分:\s*(\d+)\/10/);
+        const tgMatch = msg.match(/TG热度:\s*(\d+)/);
+        const scoreMatch = msg.match(/\((\d+)分\)/);
+        
+        const rating = ratingMatch ? ratingMatch[1].padEnd(6) : '?     ';
+        const position = posMatch ? `${posMatch[1]} SOL`.padEnd(8) : '?       ';
+        const smart = smartMatch ? `${smartMatch[1]}/${smartMatch[2]}`.padEnd(6) : '?     ';
+        const ai = aiMatch ? aiMatch[1].padStart(2) : ' ?';
+        const tg = tgMatch ? tgMatch[1].padStart(2) : ' ?';
+        const score = scoreMatch ? scoreMatch[1].padStart(3) : '  ?';
+        const time = s.signal_time ? s.signal_time.split(' ')[1] : '?';
+        
+        const emoji = s.channel_name.includes('A_Signal') ? '✅' : 
+                      s.channel_name.includes('S_Signal') ? '🚀' : '🐦';
+        
+        console.log(`   ${emoji} ${token} │ ${rating} │ ${position} │ ${smart} │ ${ai} │ ${tg} │ ${score} │ ${time}`);
+      });
+      
+      // 统计
+      const stats = db.prepare(`
+        SELECT 
+          COUNT(*) as total,
+          SUM(CASE WHEN channel_name LIKE '%S_Signal%' THEN 1 ELSE 0 END) as s_level,
+          SUM(CASE WHEN channel_name LIKE '%A_Signal%' THEN 1 ELSE 0 END) as a_level,
+          SUM(CASE WHEN channel_name LIKE '%Scout%' THEN 1 ELSE 0 END) as scout
+        FROM telegram_signals
+        WHERE channel_name LIKE 'DeBot%'
+      `).get();
+      
+      console.log('');
+      console.log(`   📊 总计: ${stats.total} 个验证信号 (🚀S级: ${stats.s_level} | ✅A级: ${stats.a_level} | 🐦Scout: ${stats.scout})`);
+    }
+  } catch (e) {
+    console.log('   ⏳ No validated signal data yet.\n');
+  }
+  console.log('');
+}
+
+// ========================================
+// 8. 模拟交易战绩
+// ========================================
+if (command === 'all' || command === 'trades') {
+  console.log('┌─────────────────────────────────────────────────────────────────────┐');
+  console.log('│ 💰 TRADING PERFORMANCE (模拟交易战绩)                               │');
+  console.log('└─────────────────────────────────────────────────────────────────────┘\n');
+  
+  try {
+    // 检查 trades 表
+    const trades = db.prepare(`
+      SELECT 
+        token_ca,
+        chain,
+        action,
+        entry_price,
+        exit_price,
+        position_size,
+        pnl_percent,
+        pnl_sol,
+        status,
+        datetime(created_at, 'unixepoch') as trade_time
+      FROM trades
+      ORDER BY created_at DESC
+      LIMIT 20
+    `).all();
+    
+    if (trades.length === 0) {
+      console.log('   ⏳ No trades yet. Enable AUTO_BUY_ENABLED=true to start simulation.\n');
+    } else {
+      // 计算总体统计
+      const perfStats = db.prepare(`
+        SELECT 
+          COUNT(*) as total_trades,
+          SUM(CASE WHEN pnl_percent > 0 THEN 1 ELSE 0 END) as wins,
+          SUM(CASE WHEN pnl_percent <= 0 THEN 1 ELSE 0 END) as losses,
+          ROUND(AVG(pnl_percent), 2) as avg_pnl,
+          ROUND(SUM(pnl_sol), 4) as total_pnl_sol,
+          ROUND(MAX(pnl_percent), 2) as best_trade,
+          ROUND(MIN(pnl_percent), 2) as worst_trade
+        FROM trades
+        WHERE status = 'closed'
+      `).get();
+      
+      const winRate = perfStats.total_trades > 0 
+        ? ((perfStats.wins / perfStats.total_trades) * 100).toFixed(1) 
+        : 0;
+      
+      console.log('   📊 OVERALL STATS:');
+      console.log(`      Total Trades: ${perfStats.total_trades}`);
+      console.log(`      Win Rate: ${winRate}% (${perfStats.wins}W / ${perfStats.losses}L)`);
+      console.log(`      Avg PnL: ${perfStats.avg_pnl >= 0 ? '+' : ''}${perfStats.avg_pnl || 0}%`);
+      console.log(`      Total PnL: ${perfStats.total_pnl_sol >= 0 ? '+' : ''}${perfStats.total_pnl_sol || 0} SOL`);
+      console.log(`      Best Trade: +${perfStats.best_trade || 0}%`);
+      console.log(`      Worst Trade: ${perfStats.worst_trade || 0}%`);
+      console.log('');
+      
+      console.log('   📜 RECENT TRADES:');
+      console.log('   Token    │ Chain │ Size     │ Entry      │ Exit       │ PnL %   │ PnL SOL │ Status');
+      console.log('   ─────────┼───────┼──────────┼────────────┼────────────┼─────────┼─────────┼────────');
+      
+      trades.forEach(t => {
+        const token = (t.token_ca || '').substring(0, 8);
+        const chain = (t.chain || '').padEnd(5);
+        const size = `${t.position_size || 0} SOL`.padEnd(8);
+        const entry = t.entry_price ? `$${t.entry_price.toFixed(8)}`.substring(0, 10).padEnd(10) : '?         ';
+        const exit = t.exit_price ? `$${t.exit_price.toFixed(8)}`.substring(0, 10).padEnd(10) : '?         ';
+        const pnlPct = t.pnl_percent !== null ? `${t.pnl_percent >= 0 ? '+' : ''}${t.pnl_percent.toFixed(1)}%`.padStart(7) : '   ?   ';
+        const pnlSol = t.pnl_sol !== null ? `${t.pnl_sol >= 0 ? '+' : ''}${t.pnl_sol.toFixed(3)}`.padStart(7) : '   ?   ';
+        
+        const emoji = t.status === 'closed' ? (t.pnl_percent > 0 ? '✅' : '❌') : '⏳';
+        
+        console.log(`   ${emoji} ${token} │ ${chain} │ ${size} │ ${entry} │ ${exit} │ ${pnlPct} │ ${pnlSol} │ ${t.status || '?'}`);
+      });
+    }
+  } catch (e) {
+    console.log('   ⏳ Trades table not initialized or error: ' + e.message + '\n');
+  }
+  console.log('');
+}
+
+// ========================================
 // 总结
 // ========================================
 console.log('═'.repeat(70));
-console.log('Commands: npm run dashboard [all|sources|signals|channels|narratives]');
+console.log('Commands: npm run dashboard [all|sources|signals|channels|narratives|validated|trades]');
 console.log('═'.repeat(70) + '\n');
 
 db.close();
