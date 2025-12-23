@@ -43,8 +43,8 @@ class CrossValidator extends EventEmitter {
             // 阈值
             thresholds: {
                 ignore: 50,          // 忽略线
-                watch: 55,           // 观察线
-                buyScout: 55,        // Scout买入线 (55-69分)
+                watch: 60,           // 观察线
+                buyScout: 60,        // Scout买入线 (60-69分)
                 buyNormal: 70,       // 普通买入线 (70-79分)
                 buyPremium: 80       // 精选买入线 (80+分)
             },

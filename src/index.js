@@ -1307,46 +1307,67 @@ class SentimentArbitrageSystem {
   injectValidatedSignal(decision) {
     try {
       const token = decision.token;
+      const isShadow = this.config.SHADOW_MODE;
       
       // 检查是否已存在（15分钟内）
       const existing = this.db.prepare(`
-        SELECT id FROM telegram_signals 
+        SELECT id FROM positions 
         WHERE token_ca = ? AND chain = ? 
-        AND created_at > ?
-      `).get(
-        token.address, 
-        token.chain,
-        Math.floor(Date.now() / 1000) - 900  // 15分钟
-      );
+        AND entry_time > datetime('now', '-15 minutes')
+      `).get(token.address, token.chain);
       
       if (existing) {
-        console.log(`   ⏭️ 信号已存在，跳过: ${token.symbol}`);
+        console.log(`   ⏭️ 已持有该币，跳过: ${token.symbol}`);
         return;
       }
       
-      // 根据决策类型设置频道名称
-      const channelName = decision.action === 'BUY_MAX' ? 'DeBot_S_Signal' :
-                          decision.action === 'BUY_NORMAL' ? 'DeBot_A_Signal' :
-                          decision.action === 'BUY_SMALL' ? 'DeBot_Scout' : 'DeBot_Signal';
+      // 根据决策类型设置级别
+      const tierName = decision.rating === 'PREMIUM' ? 'S_Signal' :
+                       decision.rating === 'NORMAL' ? 'A_Signal' : 'Scout';
       
-      // 构建消息文本
+      // 生成模拟交易 ID
+      const tradeId = Date.now();
+      
+      // 直接写入 positions 表（Shadow 模式的模拟交易）
+      this.db.prepare(`
+        INSERT INTO positions (
+          chain, token_ca, symbol, signal_id,
+          entry_time, entry_price, position_size_native, position_size_usd,
+          alpha_score, status, is_shadow
+        ) VALUES (?, ?, ?, ?, datetime('now'), ?, ?, ?, ?, 'open', ?)
+      `).run(
+        token.chain,
+        token.address,
+        token.symbol,
+        tradeId,
+        0,  // entry_price 后续会更新
+        decision.positionSize,  // position_size_native (SOL)
+        decision.positionSize * 200,  // 估算 USD (假设 SOL=$200)
+        decision.validation?.score?.total || 0,  // alpha_score
+        isShadow ? 1 : 0
+      );
+      
+      console.log(`   ✅ 模拟买入: ${token.symbol} (${decision.rating}级, ${decision.positionSize} SOL)`);
+      
+      // 同时记录到 telegram_signals 表（用于历史追踪）
+      const channelName = `DeBot_${tierName}`;
       const messageText = [
-        `${decision.action === 'BUY_MAX' ? '🚀' : decision.action === 'BUY_NORMAL' ? '✅' : '🐦'} DeBot 验证信号`,
+        `${decision.rating === 'PREMIUM' ? '🚀' : decision.rating === 'NORMAL' ? '✅' : '🐦'} DeBot 验证信号`,
         `代币: ${token.symbol}`,
         `评级: ${decision.rating}`,
         `仓位: ${decision.positionSize} SOL`,
         `聪明钱: ${decision.validation.smartMoney.online}/${decision.validation.smartMoney.total}`,
         `AI评分: ${decision.validation.aiScore}/10`,
         `TG热度: ${decision.validation.tgHeat.count}次提及`,
+        `总分: ${decision.validation?.score?.total || 0}分`,
         `理由: ${decision.reasons.slice(0, 2).join('; ')}`
       ].join('\n');
       
-      // 插入信号
       this.db.prepare(`
         INSERT INTO telegram_signals (
           token_ca, chain, channel_name, channel_username,
           message_text, timestamp, created_at, processed
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, 0)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 1)
       `).run(
         token.address,
         token.chain,
@@ -1356,8 +1377,6 @@ class SentimentArbitrageSystem {
         new Date().toISOString(),
         Math.floor(Date.now() / 1000)
       );
-      
-      console.log(`   ✅ DeBot验证信号已注入: ${token.symbol} (${decision.rating}级, ${decision.positionSize} SOL)`);
       
     } catch (error) {
       console.error('❌ Inject validated signal error:', error.message);
