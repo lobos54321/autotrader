@@ -1,52 +1,66 @@
 /**
- * Cross Validator - 交叉验证引擎
+ * Cross Validator - 交叉验证引擎 v2.0
  * 
- * 核心逻辑：DeBot 为主（事实层），Telegram 为辅（情绪层）
+ * 核心逻辑：DeBot 为主（事实层），Telegram 为辅（情绪层），LLM 做二次验证
  * 
  * 漏斗流程：
  * 1. Activity Rank (3-5秒轮询) → 发现新信号
- * 2. 第一层本地过滤 → 聪明钱/流动性/安全性
- * 3. 第二层API调用 → AI Report 叙事评分
- * 4. 第三层交叉验证 → Telegram DB 热度查询
- * 5. 综合评分决策 → Watch / Buy / Ignore
+ * 2. 第一层本地过滤 → 聪明钱/流动性/安全性 (Hard Gates)
+ * 3. 第二层API调用 → DeBot AI Report 叙事评分
+ * 4. 第三层LLM分析 → Grok 二次验证叙事质量 (可选)
+ * 5. 第四层交叉验证 → Telegram DB 热度查询
+ * 6. 综合评分决策 → Watch / Buy / Ignore
  * 
- * 评分公式 (满分100)：
+ * 评分公式 v2.0 (满分100)：
  * - 聪明钱 40%: min(smartWalletOnline × 10, 40)
- * - AI叙事 30%: rating.score × 3
- * - TG共识 20%: min(频道数 × 5, 20) + Tier1加成
- * - 安全性 10%: 非蜜罐+权限丢弃=10分
+ * - AI叙事 25%: DeBot基础(20) + LLM调节(±5)
+ * - TG共识 15%: min(频道数 × 5, 15) + Tier1加成
+ * - 报警动量 10%: signalCount 黄金区间
+ * - 安全性 10%: 权限丢弃(5) + 流动性(5)
  */
 
 import { EventEmitter } from 'events';
 import debotScout from '../inputs/debot-scout.js';
 import signalDatabase from '../database/signal-database.js';
+import aiAnalyst from '../utils/ai-analyst.js';
 
 class CrossValidator extends EventEmitter {
     constructor() {
         super();
         
-        // 评分配置
+        // 评分配置 v2.0 - AI增强版
         this.scoringConfig = {
-            // 权重
+            // 权重 (总计100%)
             weights: {
                 smartMoney: 40,      // 聪明钱权重 40%
-                narrative: 30,       // AI叙事权重 30%
-                telegram: 20,        // TG共识权重 20%
+                narrative: 25,       // AI叙事权重 25% (DeBot 20% + LLM调节 ±5%)
+                telegram: 15,        // TG共识权重 15%
+                signalMomentum: 10,  // 报警动量权重 10% (新增)
                 safety: 10           // 安全性权重 10%
             },
             
             // 阈值
             thresholds: {
-                watch: 50,           // 观察线
-                buy: 70,             // 买入线
-                maxBuy: 90           // 重仓线
+                ignore: 50,          // 忽略线
+                watch: 55,           // 观察线
+                buySmall: 55,        // 小仓买入线
+                buyNormal: 70,       // 标准买入线
+                buyMax: 80           // 重仓线
             },
             
             // 仓位配置 (SOL)
             positions: {
                 small: 0.05,         // 小仓
                 normal: 0.15,        // 中仓
-                max: 0.2             // 大仓
+                max: 0.20            // 大仓
+            },
+            
+            // 报警动量"黄金区间"配置
+            signalMomentum: {
+                goldenMin: 2,        // 黄金区起点
+                goldenMax: 15,       // 黄金区终点
+                crowdedMax: 30,      // 拥挤区终点
+                overheat: 50         // 过热阈值 (强制降级)
             }
         };
         
@@ -101,7 +115,7 @@ class CrossValidator extends EventEmitter {
             
             console.log(`\n[Validator] 🔍 开始验证: ${token.symbol} (${token.tokenAddress.slice(0,8)}...)`);
             
-            // === 第二层：获取 AI Report ===
+            // === 第二层：获取 DeBot AI Report ===
             let aiReport = token.aiReport;
             if (!aiReport) {
                 aiReport = await debotScout.fetchAIReport(token.tokenAddress);
@@ -110,10 +124,10 @@ class CrossValidator extends EventEmitter {
                 }
             }
             
-            // 检查 AI 评分
-            const aiScore = aiReport?.rating?.score || 0;
-            if (aiScore < this.hardGates.minAIScore) {
-                console.log(`[Gate] ❌ ${token.symbol}: AI评分太低 (${aiScore}/${this.hardGates.minAIScore})`);
+            // 检查 DeBot AI 评分
+            const debotScore = aiReport?.rating?.score || 0;
+            if (debotScore < this.hardGates.minAIScore) {
+                console.log(`[Gate] ❌ ${token.symbol}: DeBot评分太低 (${debotScore}/${this.hardGates.minAIScore})`);
                 return;
             }
             
@@ -128,11 +142,18 @@ class CrossValidator extends EventEmitter {
                 }
             }
             
-            // === 第三层：Telegram 交叉验证 ===
+            // === 第三层：LLM 叙事深度分析 (可选) ===
+            let llmResult = null;
+            if (process.env.AI_ANALYSIS_ENABLED === 'true') {
+                const analysisData = aiAnalyst.prepareData(token, aiReport, null);
+                llmResult = await aiAnalyst.evaluate(analysisData);
+            }
+            
+            // === 第四层：Telegram 交叉验证 ===
             const tgHeat = await this.getTelegramHeat(token.tokenAddress);
             
-            // === 综合评分 ===
-            const score = this.calculateScore(token, aiReport, tgHeat);
+            // === 综合评分 (传入 LLM 结果) ===
+            const score = this.calculateScore(token, aiReport, tgHeat, llmResult);
             
             // === 做出决策 ===
             const decision = this.makeDecision(token, aiReport, tgHeat, score);
@@ -142,13 +163,14 @@ class CrossValidator extends EventEmitter {
                 token,
                 aiReport,
                 tgHeat,
+                llmResult,
                 score,
                 decision,
                 timestamp: Date.now()
             });
             
             // 打印结果
-            this.printValidationResult(token, aiReport, tgHeat, score, decision);
+            this.printValidationResult(token, aiReport, tgHeat, score, decision, llmResult);
             
             // 发射决策事件
             if (decision.action !== 'IGNORE') {
@@ -156,6 +178,7 @@ class CrossValidator extends EventEmitter {
                     token,
                     aiReport,
                     tgHeat,
+                    llmResult,
                     score,
                     decision
                 });
@@ -283,38 +306,81 @@ class CrossValidator extends EventEmitter {
     }
     
     /**
-     * 计算综合评分
+     * 计算综合评分 v2.0
+     * 
+     * 评分公式 (满分100):
+     * - 聪明钱: 40% (smartWallet × 10, 封顶40)
+     * - AI叙事: 25% (DeBot基础20 + LLM调节±5)
+     * - TG共识: 15% (频道数 × 5, 封顶15)
+     * - 报警动量: 10% (signalCount 黄金区间)
+     * - 安全性: 10% (权限5 + 流动性5)
      */
-    calculateScore(token, aiReport, tgHeat) {
+    calculateScore(token, aiReport, tgHeat, llmResult = null) {
         const w = this.scoringConfig.weights;
+        const momentum = this.scoringConfig.signalMomentum;
+        let details = [];
         
         // 1. 聪明钱分数 (40%)
         const smartMoneyScore = Math.min((token.smartWalletOnline || 0) * 10, w.smartMoney);
+        details.push(`聪明钱: ${smartMoneyScore}/${w.smartMoney}`);
         
-        // 2. AI 叙事分数 (30%)
-        const aiScore = aiReport?.rating?.score || 0;
-        const narrativeScore = aiScore * 3; // 1-10分 × 3 = 最高30分
+        // 2. AI叙事分数 (25%) = DeBot基础(20) + LLM调节(±5)
+        const debotScore = aiReport?.rating?.score || 0;
+        const debotBase = Math.min(debotScore * 2, 20); // DeBot 1-10分 × 2 = 最高20分
         
-        // 3. TG 共识分数 (20%)
+        // LLM 调节分: (llmScore - 50) × 0.1，范围 [-5, +5]
+        let llmAdjust = 0;
+        if (llmResult && typeof llmResult.score === 'number') {
+            llmAdjust = Math.max(-5, Math.min(5, (llmResult.score - 50) * 0.1));
+        }
+        const narrativeScore = Math.max(0, Math.min(debotBase + llmAdjust, w.narrative));
+        details.push(`叙事: ${narrativeScore.toFixed(1)}/${w.narrative} (DeBot${debotBase}${llmAdjust >= 0 ? '+' : ''}${llmAdjust.toFixed(1)})`);
+        
+        // 3. TG共识分数 (15%)
         let tgScore = Math.min((tgHeat.channelCount || 0) * 5, w.telegram);
-        // Tier 1 加成
+        // Tier 1 加成 (+2分，不超过上限)
         if (tgHeat.tier1Count > 0) {
             tgScore = Math.min(tgScore + 2, w.telegram);
         }
+        details.push(`TG: ${tgScore}/${w.telegram}`);
         
-        // 4. 安全性分数 (10%)
+        // 4. 报警动量分数 (10%) - 黄金区间规则
+        const signalCount = token.signalCount || 0;
+        let signalBonus = 0;
+        let signalStatus = '';
+        
+        if (signalCount >= momentum.goldenMin && signalCount <= momentum.goldenMax) {
+            signalBonus = 10;  // 🚀 黄金区 (最强)
+            signalStatus = '🚀黄金区';
+        } else if (signalCount > momentum.goldenMax && signalCount <= momentum.crowdedMax) {
+            signalBonus = 5;   // 📈 鱼身区
+            signalStatus = '📈鱼身区';
+        } else if (signalCount > momentum.crowdedMax && signalCount <= momentum.overheat) {
+            signalBonus = 0;   // ⚠️ 拥挤区
+            signalStatus = '⚠️拥挤区';
+        } else if (signalCount > momentum.overheat) {
+            signalBonus = -5;  // 🔴 过热区 (扣分)
+            signalStatus = '🔴过热区';
+        } else {
+            signalStatus = '冷启动';
+        }
+        details.push(`动量: ${signalBonus}/${w.signalMomentum} [${signalStatus}, ${signalCount}次]`);
+        
+        // 5. 安全性分数 (10%)
         let safetyScore = 0;
         if (token.isMintAbandoned !== false) {
             safetyScore += 5;
         }
-        // 流动性足够也加分
         if ((token.liquidity || 0) >= this.hardGates.minLiquidity) {
             safetyScore += 5;
         }
         safetyScore = Math.min(safetyScore, w.safety);
+        details.push(`安全: ${safetyScore}/${w.safety}`);
         
         // 总分
-        const totalScore = smartMoneyScore + narrativeScore + tgScore + safetyScore;
+        const totalScore = smartMoneyScore + narrativeScore + tgScore + signalBonus + safetyScore;
+        
+        console.log(`📊 评分明细 [${Math.round(totalScore)}分]: ${details.join(' | ')}`);
         
         return {
             total: Math.round(totalScore),
@@ -322,64 +388,101 @@ class CrossValidator extends EventEmitter {
                 smartMoney: smartMoneyScore,
                 narrative: narrativeScore,
                 telegram: tgScore,
+                signalMomentum: signalBonus,
                 safety: safetyScore
-            }
+            },
+            signalCount: signalCount,
+            llmRisk: llmResult?.risk_level || 'UNKNOWN'
         };
     }
     
     /**
-     * 做出决策
+     * 做出决策 v2.0
+     * 
+     * 决策矩阵:
+     * - < 50分: IGNORE
+     * - 50-54分: WATCH
+     * - 55-69分: BUY_SMALL (0.05 SOL)
+     * - 70-79分: BUY_NORMAL (0.15 SOL)
+     * - 80+分: BUY_MAX (0.20 SOL)
+     * 
+     * 强制降级规则:
+     * - signalCount > 50: 强制 WATCH
+     * - LLM risk_level = HIGH: 最高 WATCH
      */
     makeDecision(token, aiReport, tgHeat, score) {
         const thresholds = this.scoringConfig.thresholds;
         const positions = this.scoringConfig.positions;
+        const momentum = this.scoringConfig.signalMomentum;
         
-        // 低于观察线 → 忽略
-        if (score.total < thresholds.watch) {
+        // === 强制降级规则 ===
+        
+        // 规则1: 信号过热 (>50次) → 强制 WATCH
+        if (score.signalCount > momentum.overheat) {
             return {
-                action: 'IGNORE',
-                reason: `评分不足 (${score.total}/${thresholds.watch})`,
+                action: 'WATCH',
+                tier: null,
+                reason: `🔴 信号过热 (${score.signalCount}次 > ${momentum.overheat})，强制观望`,
                 position: 0
             };
         }
         
-        // 观察区间
-        if (score.total < thresholds.buy) {
+        // 规则2: LLM 识别高风险 → 强制 WATCH
+        if (score.llmRisk === 'HIGH') {
             return {
                 action: 'WATCH',
-                reason: `进入观察 (${score.total}分)`,
+                tier: null,
+                reason: `⚠️ AI识别高风险，强制观望`,
+                position: 0
+            };
+        }
+        
+        // === 正常决策流程 ===
+        
+        // 低于忽略线 → IGNORE
+        if (score.total < thresholds.ignore) {
+            return {
+                action: 'IGNORE',
+                tier: null,
+                reason: `❌ 评分不足 (${score.total}分 < ${thresholds.ignore})`,
+                position: 0
+            };
+        }
+        
+        // 观察区间 [50, 55)
+        if (score.total < thresholds.buySmall) {
+            return {
+                action: 'WATCH',
+                tier: null,
+                reason: `👀 观察中 (${score.total}分)`,
                 position: 0
             };
         }
         
         // 买入区间
-        let position = positions.small;
-        let tier = 'SCOUT';
+        let position, tier, emoji;
         
-        if (score.total >= thresholds.maxBuy) {
-            // 顶级局
+        if (score.total >= thresholds.buyMax) {
+            // S级: 80+ 分
             position = positions.max;
             tier = 'MAX';
-        } else if (score.total >= 80) {
-            // 共识局
+            emoji = '🚀';
+        } else if (score.total >= thresholds.buyNormal) {
+            // A级: 70-79 分
             position = positions.normal;
-            tier = 'TREND';
+            tier = 'NORMAL';
+            emoji = '✅';
         } else {
-            // 早鸟局
+            // B级: 55-69 分 (潜伏局)
             position = positions.small;
             tier = 'SCOUT';
-        }
-        
-        // 根据 TG 热度调整
-        if (tgHeat.channelCount > 0 && tier === 'SCOUT') {
-            tier = 'TREND';
-            position = positions.normal;
+            emoji = '🐦';
         }
         
         return {
             action: 'BUY',
             tier,
-            reason: this.getDecisionReason(token, aiReport, tgHeat, score),
+            reason: `${emoji} ${tier}级 (${score.total}分) - ${this.getDecisionReason(token, aiReport, tgHeat, score)}`,
             position
         };
     }
@@ -410,26 +513,36 @@ class CrossValidator extends EventEmitter {
     }
     
     /**
-     * 打印验证结果
+     * 打印验证结果 v2.0
      */
-    printValidationResult(token, aiReport, tgHeat, score, decision) {
+    printValidationResult(token, aiReport, tgHeat, score, decision, llmResult = null) {
         const symbol = token.symbol || token.tokenAddress.slice(0, 8);
         
-        console.log(`\n${'='.repeat(50)}`);
+        console.log(`\n${'='.repeat(60)}`);
         console.log(`📊 [CrossValidator] 验证结果: ${symbol}`);
-        console.log(`${'='.repeat(50)}`);
+        console.log(`${'='.repeat(60)}`);
         
         // 基础信息
         console.log(`📍 地址: ${token.tokenAddress}`);
         console.log(`⛓️  链: ${token.chain}`);
         console.log(`💰 流动性: $${(token.liquidity || 0).toLocaleString()}`);
+        console.log(`📢 报警次数: ${token.signalCount || 0}`);
         
-        // 分数明细
+        // 分数明细 (新版)
         console.log(`\n📈 评分明细 (总分: ${score.total}/100):`);
-        console.log(`   聪明钱: ${score.breakdown.smartMoney}/40 (${token.smartWalletOnline || 0}个在线)`);
-        console.log(`   AI叙事: ${score.breakdown.narrative}/30 (评分${aiReport?.rating?.score || 0}/10)`);
-        console.log(`   TG共识: ${score.breakdown.telegram}/20 (${tgHeat.channelCount}个频道)`);
-        console.log(`   安全性: ${score.breakdown.safety}/10`);
+        console.log(`   聪明钱:   ${score.breakdown.smartMoney}/40 (${token.smartWalletOnline || 0}个在线)`);
+        console.log(`   AI叙事:   ${score.breakdown.narrative.toFixed(1)}/25 (DeBot ${aiReport?.rating?.score || 0}/10${llmResult ? `, LLM ${llmResult.score}分` : ''})`);
+        console.log(`   TG共识:   ${score.breakdown.telegram}/15 (${tgHeat.channelCount}个频道)`);
+        console.log(`   报警动量: ${score.breakdown.signalMomentum}/10`);
+        console.log(`   安全性:   ${score.breakdown.safety}/10`);
+        
+        // LLM 分析结果
+        if (llmResult) {
+            console.log(`\n🧠 LLM分析:`);
+            console.log(`   评分: ${llmResult.score}/100`);
+            console.log(`   判断: ${llmResult.reason}`);
+            console.log(`   风险: ${llmResult.risk_level}`);
+        }
         
         // 决策
         const actionEmoji = {
@@ -447,11 +560,11 @@ class CrossValidator extends EventEmitter {
             console.log(`   仓位: ${decision.position} SOL`);
         }
         
-        console.log(`${'='.repeat(50)}\n`);
+        console.log(`${'='.repeat(60)}\n`);
     }
     
     /**
-     * 启动验证器
+     * 启动验证器 v2.0
      */
     start() {
         if (this.isRunning) {
@@ -462,15 +575,23 @@ class CrossValidator extends EventEmitter {
         this.isRunning = true;
         this.init();
         
-        console.log('\n🔄 [CrossValidator] 交叉验证引擎启动');
+        const t = this.scoringConfig.thresholds;
+        const m = this.scoringConfig.signalMomentum;
+        
+        console.log('\n🔄 [CrossValidator v2.0] 交叉验证引擎启动');
         console.log(`   Hard Gates:`);
         console.log(`     - 最少聪明钱: ${this.hardGates.minSmartWalletOnline}`);
         console.log(`     - 最低流动性: $${this.hardGates.minLiquidity}`);
-        console.log(`     - 最低AI评分: ${this.hardGates.minAIScore}`);
-        console.log(`   评分阈值:`);
-        console.log(`     - 观察线: ${this.scoringConfig.thresholds.watch}分`);
-        console.log(`     - 买入线: ${this.scoringConfig.thresholds.buy}分`);
-        console.log(`     - 重仓线: ${this.scoringConfig.thresholds.maxBuy}分`);
+        console.log(`     - 最低DeBot评分: ${this.hardGates.minAIScore}`);
+        console.log(`   评分权重:`);
+        console.log(`     - 聪明钱: 40% | AI叙事: 25% | TG共识: 15% | 动量: 10% | 安全: 10%`);
+        console.log(`   决策阈值:`);
+        console.log(`     - IGNORE: <${t.ignore}分 | WATCH: ${t.ignore}-${t.buySmall-1}分`);
+        console.log(`     - BUY_SMALL: ${t.buySmall}-${t.buyNormal-1}分 | BUY_NORMAL: ${t.buyNormal}-${t.buyMax-1}分 | BUY_MAX: ${t.buyMax}+分`);
+        console.log(`   报警动量黄金区间:`);
+        console.log(`     - 黄金区: ${m.goldenMin}-${m.goldenMax}次 (+10分)`);
+        console.log(`     - 过热强制WATCH: >${m.overheat}次`);
+        console.log(`   LLM分析: ${process.env.AI_ANALYSIS_ENABLED === 'true' ? '✅ 已启用' : '❌ 未启用'}`);
     }
     
     /**
